@@ -4,7 +4,7 @@
  * Tests the actual DocumentAgent code with a mocked Agent base class.
  * The agents SDK uses cloudflare: protocol imports, so we mock the base
  * class and test lifecycle methods (onConnect, onMessage, onClose,
- * onRequest, alarm) directly.
+ * onRequest) directly.
  *
  * For Yjs sync tests, real Y.Doc clients exchange messages through the
  * actual agent code — testing the sync relay, SQL persistence, and
@@ -13,7 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as Y from "yjs";
 import * as awarenessProtocol from "y-protocols/awareness";
-import { DOCUMENT_TTL_MS, DOC_FORMAT_VERSION } from "~/shared/constants";
+import { DOC_FORMAT_VERSION } from "~/shared/constants";
 import { YjsProvider } from "~/lib/yjs-provider";
 
 /* ------------------------------------------------------------------ */
@@ -22,19 +22,12 @@ import { YjsProvider } from "~/lib/yjs-provider";
 
 let mockSqlStore: Map<string, ArrayBuffer>;
 let mockConnectionMap: Map<string, MockConnection>;
-let mockSetAlarm: ReturnType<typeof vi.fn>;
 
 vi.mock("agents", () => ({
   Agent: class MockAgent {
     name = "test-doc";
     env = {};
-    ctx = {
-      storage: {
-        get setAlarm() {
-          return mockSetAlarm;
-        },
-      },
-    };
+    ctx = {};
 
     sql(strings: TemplateStringsArray, ...values: unknown[]) {
       const query = strings.join("$").toLowerCase().trim();
@@ -154,7 +147,6 @@ describe("DocumentAgent", () => {
     vi.stubGlobal("WebSocket", MockSocket);
     mockSqlStore = new Map();
     mockConnectionMap = new Map();
-    mockSetAlarm = vi.fn();
     nextConnId = 1;
 
     const mod = await import("../../../agents/document");
@@ -271,17 +263,6 @@ describe("DocumentAgent", () => {
       cleanup(client);
     });
 
-    it("sets auto-delete alarm at createdAt + DOCUMENT_TTL_MS", async () => {
-      const before = Date.now();
-      await agent.onRequest(new Request("https://do/", { method: "POST" }));
-      const after = Date.now();
-
-      expect(mockSetAlarm).toHaveBeenCalledOnce();
-      const alarmTime = mockSetAlarm.mock.calls[0][0] as number;
-      expect(alarmTime).toBeGreaterThanOrEqual(before + DOCUMENT_TTL_MS);
-      expect(alarmTime).toBeLessThanOrEqual(after + DOCUMENT_TTL_MS);
-    });
-
     it("imports plain text content", async () => {
       await agent.onRequest(
         new Request("https://do/", {
@@ -393,46 +374,6 @@ describe("DocumentAgent", () => {
         new Request("https://do/", { method: "PUT" }),
       );
       expect(res.status).toBe(404);
-    });
-  });
-
-  /* ================================================================ */
-  /*  Alarm (auto-delete)                                              */
-  /* ================================================================ */
-
-  describe("alarm", () => {
-    it("clears all SQL data", async () => {
-      await agent.onRequest(new Request("https://do/", { method: "POST" }));
-      expect(mockSqlStore.size).toBeGreaterThan(0);
-
-      await agent.alarm();
-
-      expect(mockSqlStore.size).toBe(0);
-    });
-
-    it("closes all active connections with code 1000", async () => {
-      await agent.onRequest(new Request("https://do/", { method: "POST" }));
-      const conn1 = createConnection();
-      const conn2 = createConnection();
-
-      await agent.alarm();
-
-      expect(conn1.closed).toBe(true);
-      expect(conn1.closeCode).toBe(1000);
-      expect(conn1.closeReason).toBe("Document expired");
-      expect(conn2.closed).toBe(true);
-    });
-
-    it("resets agent to fresh state (exists: false after alarm)", async () => {
-      await agent.onRequest(new Request("https://do/", { method: "POST" }));
-      const client = connectYjsClient();
-      cleanup(client);
-
-      await agent.alarm();
-
-      const res = await agent.onRequest(new Request("https://do/"));
-      const body = (await res.json()) as { exists: boolean };
-      expect(body.exists).toBe(false);
     });
   });
 

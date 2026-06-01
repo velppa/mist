@@ -2,12 +2,6 @@
 mist:
   onboarding: true
   threads:
-    - comment: "Docs are ephemeral."
-      highlight: "99 hours"
-      author: "Matt"
-      color: "#E57373"
-      created: "2026-02-12T11:40:00Z"
-      resolved: false
     - comment: "Should we use a stronger word here?"
       highlight: "good"
       author: "Alice"
@@ -30,7 +24,7 @@ mist:
 
 This is a **collaborative Markdown editor** with _real-time_ multiplayer editing, suggestions, and inline comments.
 
-- **Share** a link to collaborate with others. _Docs auto-delete {==99 hours==}{>>Docs are ephemeral.<<} after creation._
+- **Share** a link to collaborate with others.
 - **Quick import.** Drag and drop an `.md` file or run a terminal command to create a new doc from an existing file.
 
 Ready to edit? Hit the {++Start Editing++} button to clear this intro doc and begin.

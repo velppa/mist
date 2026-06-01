@@ -5,7 +5,7 @@ import * as syncProtocol from "y-protocols/sync";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
-import { MSG_SYNC, MSG_AWARENESS, DOCUMENT_TTL_MS, DOC_FORMAT_VERSION } from "../app/shared/constants";
+import { MSG_SYNC, MSG_AWARENESS, DOC_FORMAT_VERSION } from "../app/shared/constants";
 
 /**
  * Durable Objects SQLite accepts Uint8Array for BLOB columns via the
@@ -148,19 +148,6 @@ class DocumentAgent extends Agent {
     }
   }
 
-  override readonly alarm = async (): Promise<void> => {
-    // Auto-delete: remove all document data
-    this.sql`DELETE FROM doc_state`;
-    // Close all active WebSocket connections
-    for (const conn of this.getConnections()) {
-      conn.close(1000, "Document expired");
-    }
-    // Clean up in-memory state
-    this.doc?.destroy();
-    this.doc = null;
-    this.awareness = null;
-  };
-
   async onRequest(request: Request) {
     if (request.method === "POST") {
       // Create / initialise the document
@@ -176,13 +163,12 @@ class DocumentAgent extends Agent {
         meta.set("version", DOC_FORMAT_VERSION);
       }
 
-      // Store creation timestamp and set auto-delete alarm
+      // Store creation timestamp
       const now = Date.now();
       this.sql`
         INSERT INTO doc_state (key, value) VALUES ('createdAt', ${sqlBlob(new Uint8Array(new Float64Array([now]).buffer))})
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `;
-      await this.ctx.storage.setAlarm(now + DOCUMENT_TTL_MS);
 
       // If the request has a JSON body with content, populate the Yjs doc
       const contentType = request.headers.get("Content-Type") || "";

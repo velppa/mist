@@ -27,12 +27,6 @@ export const USER_COLOURS = [
   { color: "#AED581", light: "#DCEDC8" },
 ] as const;
 
-/** Document time-to-live in milliseconds (99 hours) */
-export const DOCUMENT_TTL_MS = 99 * 60 * 60 * 1000;
-
-/** Document time-to-live in hours (for display) */
-export const DOCUMENT_TTL_HOURS = 99;
-
 /**
  * Yjs document format version. Bump when the shared type schema changes
  * (e.g. switching CriticMarkup from plain text to ProseMirror marks).

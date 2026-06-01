@@ -2,6 +2,7 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	// Set CLOUDFLARE_ACCOUNT_ID env var or add your account_id here
 	"name": "mist",
+	"account_id": "5e2bfd4b0bf365b232cfc749bf0e62ee",
 	"compatibility_date": "2025-04-04",
 	"compatibility_flags": ["nodejs_compat"],
 	"main": "./workers/app.ts",

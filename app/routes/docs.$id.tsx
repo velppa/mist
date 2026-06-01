@@ -1,7 +1,7 @@
 import { data, Link } from "react-router";
 import type { Route } from "./+types/docs.$id";
 import { getAgentByName } from "agents";
-import { isValidDocumentId, DOCUMENT_TTL_MS } from "~/shared/constants";
+import { isValidDocumentId } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { useYjsEditor } from "~/lib/useYjsEditor";
 import { DocumentProvider, useDocument } from "~/lib/DocumentContext";
@@ -44,28 +44,18 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   return { id, createdAt };
 }
 
-function formatRemainingTime(createdAt: number): string {
-  const elapsed = Date.now() - createdAt;
-  const remainingMs = DOCUMENT_TTL_MS - elapsed;
-  if (remainingMs <= 0) return "soon";
-  const hours = Math.floor(remainingMs / (60 * 60 * 1000));
-  if (hours >= 1) return `${hours}h`;
-  const minutes = Math.ceil(remainingMs / (60 * 1000));
-  return `${minutes}m`;
-}
-
 export default function DocumentPage({ loaderData }: Route.ComponentProps) {
   const { id, createdAt } = loaderData;
   const yjs = useYjsEditor(id);
 
   return (
     <DocumentProvider docId={id} createdAt={createdAt} yjs={yjs}>
-      <DocumentLayout id={id} createdAt={createdAt} />
+      <DocumentLayout id={id} />
     </DocumentProvider>
   );
 }
 
-function DocumentLayout({ id, createdAt }: { id: string; createdAt: number | null }) {
+function DocumentLayout({ id }: { id: string }) {
   const {
     yjs,
     showPreview,
@@ -91,11 +81,6 @@ function DocumentLayout({ id, createdAt }: { id: string; createdAt: number | nul
         </Link>
         <div className="flex grow shrink-0 items-center px-4">
           <span className="font-mono font-bold">{id}</span>
-          {createdAt && (
-            <span className="ml-2 whitespace-nowrap text-muted">
-              auto-deletes in {formatRemainingTime(createdAt)}
-            </span>
-          )}
         </div>
         <div className="flex shrink-0 items-center border-l border-border px-3">
           <ConnectionStatus />

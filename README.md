@@ -14,7 +14,6 @@ Everything is public by URL. Documents persist live with no save button. Multipl
 - **CLI upload** — `curl https://your-domain/new -T file.md`
 - **Drag and drop** `.md` files to create new documents
 - **Dark/light/auto themes**
-- **Documents auto-expire** after 99 hours
 
 ## Tech stack
 
