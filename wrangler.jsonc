@@ -11,11 +11,15 @@
 	},
 	"durable_objects": {
 		"bindings": [
-			{ "name": "DocumentAgent", "class_name": "DocumentAgent" }
+			{ "name": "DocumentAgent", "class_name": "DocumentAgent" },
+			{ "name": "DocumentRegistry", "class_name": "DocumentRegistry" },
+			{ "name": "TokenStore", "class_name": "TokenStore" }
 		]
 	},
 	"migrations": [
-		{ "tag": "v1", "new_sqlite_classes": ["DocumentAgent"] }
+		{ "tag": "v1", "new_sqlite_classes": ["DocumentAgent"] },
+		{ "tag": "v2", "new_sqlite_classes": ["DocumentRegistry"] },
+		{ "tag": "v3", "new_sqlite_classes": ["TokenStore"] }
 	],
 	"keep_vars": true
 }

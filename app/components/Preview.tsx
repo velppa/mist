@@ -16,6 +16,8 @@ export default function Preview() {
   const { markdown } = useDocument();
 
   const html = useMemo(() => {
+    // DOMPurify needs a DOM; during SSR render empty and let the client fill in
+    if (typeof DOMPurify.sanitize !== "function") return "";
     const withCritic = renderCriticMarkup(markdown);
     const raw = marked.parse(withCritic, { async: false }) as string;
     return DOMPurify.sanitize(raw);

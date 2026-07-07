@@ -36,7 +36,15 @@ export const USER_COLOURS = [
  */
 export const DOC_FORMAT_VERSION = 2;
 
+/** Name of the singleton DocumentRegistry Durable Object instance */
+export const REGISTRY_AGENT_NAME = "registry";
+/** Maximum number of documents listed on the homepage */
+export const REGISTRY_LIMIT = 100;
+
 /** Protocol message type: Yjs sync */
 export const MSG_SYNC = 0;
 /** Protocol message type: Yjs awareness */
 export const MSG_AWARENESS = 1;
+
+/** Name of the singleton TokenStore Durable Object instance */
+export const TOKEN_STORE_AGENT_NAME = "tokens";

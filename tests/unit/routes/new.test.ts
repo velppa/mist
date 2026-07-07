@@ -4,8 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /*  Mocks                                                              */
 /* ------------------------------------------------------------------ */
 
-const { mockAgentFetch } = vi.hoisted(() => ({
+const { mockAgentFetch, mockEnv } = vi.hoisted(() => ({
   mockAgentFetch: vi.fn(),
+  // Mutable env — tests set auth vars on it and must clean them up
+  mockEnv: { DocumentAgent: {} } as Record<string, unknown>,
 }));
 
 vi.mock("agents", () => ({
@@ -13,9 +15,7 @@ vi.mock("agents", () => ({
 }));
 
 vi.mock("~/lib/cloudflare.server", () => ({
-  getCloudflare: vi.fn().mockReturnValue({
-    env: { DocumentAgent: {} },
-  }),
+  getCloudflare: vi.fn().mockImplementation(() => ({ env: mockEnv })),
 }));
 
 vi.mock("~/shared/constants", async () => {
@@ -249,5 +249,172 @@ mist:
       context,
     } as Parameters<typeof action>[0]);
     expect(r2.headers.get("Content-Type")).toBe("text/plain");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Authentication                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("POST /new authentication", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAgentFetch.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    delete mockEnv.MIST_API_TOKENS;
+    delete mockEnv.ONELOGIN_SUBDOMAIN;
+    delete mockEnv.ONELOGIN_CLIENT_ID;
+    delete mockEnv.ONELOGIN_CLIENT_SECRET;
+    delete mockEnv.SESSION_SECRET;
+  });
+
+  it("stays open when no auth is configured", async () => {
+    const response = await action({
+      request: postRequest("# Open"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-author")).toBeNull();
+  });
+
+  it("uses the frontmatter author when the submitter is anonymous", async () => {
+    const response = await action({
+      request: postRequest("---\nauthor: fm-alice\n---\n# Doc"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-author")).toBe("fm-alice");
+  });
+
+  it("prefers the verified email over a frontmatter author claim", async () => {
+    mockEnv.MIST_API_TOKENS = '{"s3cret":"alice@vio.com"}';
+
+    const response = await action({
+      request: postRequest("---\nauthor: fm-bob\n---\n# Doc", {
+        Authorization: "Bearer s3cret",
+      }),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-author")).toBe("alice@vio.com");
+  });
+
+  it("forwards frontmatter public: true as x-mist-public", async () => {
+    const response = await action({
+      request: postRequest("---\npublic: true\n---\n# Doc"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-public")).toBe("true");
+  });
+
+  it("omits x-mist-public without a frontmatter opt-in", async () => {
+    const response = await action({
+      request: postRequest("# Doc"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-public")).toBeNull();
+  });
+
+  it("returns 401 when tokens configured and no Authorization header", async () => {
+    mockEnv.MIST_API_TOKENS = '{"s3cret":"alice@vio.com"}';
+
+    const response = await action({
+      request: postRequest("# Doc"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Content-Type")).toBe("text/plain");
+    const text = await response.text();
+    expect(text).toContain("authentication required");
+    expect(mockAgentFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 for a wrong token", async () => {
+    mockEnv.MIST_API_TOKENS = '{"s3cret":"alice@vio.com"}';
+
+    const response = await action({
+      request: postRequest("# Doc", { Authorization: "Bearer nope" }),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(401);
+    const text = await response.text();
+    expect(text).toContain("invalid API token");
+    expect(mockAgentFetch).not.toHaveBeenCalled();
+  });
+
+  it("returns 201 and records author for a valid token", async () => {
+    mockEnv.MIST_API_TOKENS = '{"s3cret":"alice@vio.com"}';
+
+    const response = await action({
+      request: postRequest("# Doc", { Authorization: "Bearer s3cret" }),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-author")).toBe("alice@vio.com");
+  });
+
+  it("accepts token:email CSV format", async () => {
+    mockEnv.MIST_API_TOKENS = "tok1:alice@vio.com,tok2:bob@vio.com";
+
+    const response = await action({
+      request: postRequest("# Doc", { Authorization: "Bearer tok2" }),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-author")).toBe("bob@vio.com");
+  });
+
+  it("accepts a browser session when SSO is configured", async () => {
+    mockEnv.ONELOGIN_SUBDOMAIN = "vio";
+    mockEnv.ONELOGIN_CLIENT_ID = "client";
+    mockEnv.ONELOGIN_CLIENT_SECRET = "secret";
+    mockEnv.SESSION_SECRET = "session-secret";
+
+    const { createSessionCookie } = await import("~/lib/auth.server");
+    const setCookie = await createSessionCookie("carol@vio.com", "session-secret");
+    const cookieValue = setCookie.split(";")[0]; // "mist_session=..."
+
+    const response = await action({
+      request: postRequest("# Doc", { Cookie: cookieValue }),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-author")).toBe("carol@vio.com");
+  });
+
+  it("returns 401 when SSO configured and no session nor token", async () => {
+    mockEnv.ONELOGIN_SUBDOMAIN = "vio";
+    mockEnv.ONELOGIN_CLIENT_ID = "client";
+    mockEnv.ONELOGIN_CLIENT_SECRET = "secret";
+    mockEnv.SESSION_SECRET = "session-secret";
+
+    const response = await action({
+      request: postRequest("# Doc"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(401);
+    expect(mockAgentFetch).not.toHaveBeenCalled();
   });
 });

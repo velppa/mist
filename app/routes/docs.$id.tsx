@@ -3,6 +3,7 @@ import type { Route } from "./+types/docs.$id";
 import { getAgentByName } from "agents";
 import { isValidDocumentId } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
+import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { useYjsEditor } from "~/lib/useYjsEditor";
 import { DocumentProvider, useDocument } from "~/lib/DocumentContext";
 import Editor from "~/components/Editor";
@@ -10,6 +11,7 @@ import Preview from "~/components/Preview";
 import PreviewToggle from "~/components/PreviewToggle";
 import ConnectionStatus from "~/components/ConnectionStatus";
 import ShareButton from "~/components/ShareButton";
+import UserMenu from "~/components/UserMenu";
 import ModeToggle from "~/components/ModeToggle";
 import CleanViewToggle from "~/components/CleanViewToggle";
 import SuggestionActions from "~/components/SuggestionActions";
@@ -23,7 +25,7 @@ export function meta(_args: Route.MetaArgs) {
   return [{ title: "mist" }];
 }
 
-export async function loader({ params, context }: Route.LoaderArgs) {
+export async function loader({ params, context, request }: Route.LoaderArgs) {
   const id = params.id;
   if (!isValidDocumentId(id)) {
     throw data(null, { status: 404 });
@@ -32,24 +34,28 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   const { env } = getCloudflare(context);
   const stub = await getAgentByName(env.DocumentAgent, id);
   const res = await stub.fetch(new Request("https://do/"));
-  const { exists, createdAt } = (await res.json()) as {
+  const { exists, createdAt, author } = (await res.json()) as {
     exists: boolean;
     createdAt: number | null;
+    author?: string | null;
   };
 
   if (!exists) {
     throw data(null, { status: 404 });
   }
 
-  return { id, createdAt };
+  // Signed-in identity: used as awareness name and comment author.
+  const userEmail = await getSessionEmail(request, env as AuthEnv);
+
+  return { id, createdAt, author: author ?? null, userEmail };
 }
 
 export default function DocumentPage({ loaderData }: Route.ComponentProps) {
-  const { id, createdAt } = loaderData;
-  const yjs = useYjsEditor(id);
+  const { id, createdAt, userEmail } = loaderData;
+  const yjs = useYjsEditor(id, userEmail);
 
   return (
-    <DocumentProvider docId={id} createdAt={createdAt} yjs={yjs}>
+    <DocumentProvider docId={id} createdAt={createdAt} userEmail={userEmail} yjs={yjs}>
       <DocumentLayout id={id} />
     </DocumentProvider>
   );
@@ -85,6 +91,7 @@ function DocumentLayout({ id }: { id: string }) {
         <div className="flex shrink-0 items-center border-l border-border px-3">
           <ConnectionStatus />
         </div>
+        <UserMenu />
         <div className="shrink-0 border-l border-border">
           <ShareButton />
         </div>

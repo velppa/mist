@@ -1,14 +1,41 @@
 import { useRef, useState, useCallback } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { getAgentByName } from "agents";
 import type { Route } from "./+types/home";
-import { APP_NAME, generateDocumentId } from "~/shared/constants";
+import {
+  APP_NAME,
+  generateDocumentId,
+  REGISTRY_AGENT_NAME,
+} from "~/shared/constants";
+import type { RegistryEntry } from "~/shared/types";
+import { getCloudflare } from "~/lib/cloudflare.server";
+import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { deserializeThreads } from "~/lib/thread-serialization";
 import ThemeSelector from "~/components/ThemeSelector";
 import demoDocument from "./demo.md?raw";
 
-export function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  return { origin: url.origin };
+
+  const { env } = getCloudflare(context);
+  const userEmail = await getSessionEmail(request, env as AuthEnv);
+
+  let documents: RegistryEntry[] = [];
+  try {
+    const registry = await getAgentByName(
+      env.DocumentRegistry,
+      REGISTRY_AGENT_NAME,
+    );
+    const res = await registry.fetch(new Request("https://registry/"));
+    if (res.ok) {
+      const body = (await res.json()) as { documents: RegistryEntry[] };
+      documents = body.documents;
+    }
+  } catch {
+    // The homepage must render even if the registry is unavailable
+  }
+
+  return { origin: url.origin, documents, userEmail };
 }
 
 export function meta(_args: Route.MetaArgs) {
@@ -18,8 +45,49 @@ export function meta(_args: Route.MetaArgs) {
   ];
 }
 
+function formatDate(timestamp: number): string {
+  // Fixed ISO date keeps server and client renders identical
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function RecentDocuments({ documents }: { documents: RegistryEntry[] }) {
+  if (documents.length === 0) return null;
+
+  return (
+    <section className="mx-auto w-full max-w-2xl px-4 pb-16">
+      <h2 className="mb-2 font-mono font-light uppercase tracking-wider text-muted">
+        Recent documents
+      </h2>
+      <ul>
+        {documents.map((doc) => (
+          <li
+            key={doc.id}
+            className="flex items-baseline gap-4 border-t border-border py-2"
+          >
+            <Link
+              to={`/docs/${doc.id}`}
+              className="min-w-0 flex-1 truncate text-ink transition-colors hover:text-coral"
+            >
+              {doc.title}
+            </Link>
+            {doc.author && (
+              <span className="shrink-0 truncate text-muted">{doc.author}</span>
+            )}
+            <time
+              dateTime={new Date(doc.updatedAt).toISOString()}
+              className="shrink-0 font-mono text-base text-muted"
+            >
+              {formatDate(doc.updatedAt)}
+            </time>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { origin } = loaderData;
+  const { origin, documents } = loaderData;
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
@@ -40,7 +108,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: body, threads, onboarding }),
     });
-    navigate(`/docs/${id}`);
+    // Creators land in edit mode; shared links open in preview by default
+    navigate(`/docs/${id}?view=edit`);
   }
 
   const handleUpload = useCallback(
@@ -56,7 +125,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         body: JSON.stringify({ content: body, threads }),
       });
 
-      navigate(`/docs/${id}`);
+      navigate(`/docs/${id}?view=edit`);
     },
     [navigate],
   );
@@ -85,7 +154,9 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   return (
     <>
       <div
-        className="relative flex min-h-screen flex-col items-center justify-center px-4"
+        className={`relative flex flex-col items-center justify-center px-4 ${
+          documents.length > 0 ? "min-h-[70vh]" : "min-h-screen"
+        }`}
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
@@ -160,17 +231,17 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </button>
         </div>
       </div>
+      <RecentDocuments documents={documents} />
       <footer className="fixed bottom-0 left-0 right-0 z-10 flex items-baseline justify-between border-t border-border bg-paper px-4 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-base text-muted">
         <span>
-          <span className="whitespace-nowrap">Work in progress.</span> Bugs and
-          feedback on{" "}
+          Bugs and feedback on{" "}
           <a
-            href="https://github.com/inanimate-tech/mist"
+            href="https://github.com/velppa/mist"
             target="_blank"
             rel="noopener noreferrer"
             className="text-ink transition-colors hover:text-coral"
           >
-            GitHub
+            velppa/mist
           </a>
           .
         </span>

@@ -23,6 +23,20 @@ export interface ThreadData {
   replies: ThreadReply[];
 }
 
+/**
+ * A document's entry in the registry that backs the homepage listing.
+ * `author` is optional metadata: populated from markdown frontmatter
+ * today, and designed to also carry an authenticated author once auth
+ * lands.
+ */
+export interface RegistryEntry {
+  id: string;
+  title: string;
+  author: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface CapturedSelection {
   from: number;
   to: number;

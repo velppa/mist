@@ -15,6 +15,7 @@ import * as Y from "yjs";
 import * as awarenessProtocol from "y-protocols/awareness";
 import { DOC_FORMAT_VERSION } from "~/shared/constants";
 import { YjsProvider } from "~/lib/yjs-provider";
+import { REGISTRY_SYNC_DEBOUNCE_MS } from "../../../agents/document";
 
 /* ------------------------------------------------------------------ */
 /*  Mock Agent base class                                              */
@@ -22,12 +23,29 @@ import { YjsProvider } from "~/lib/yjs-provider";
 
 let mockSqlStore: Map<string, ArrayBuffer>;
 let mockConnectionMap: Map<string, MockConnection>;
+let mockAgentEnv: Record<string, unknown>;
+let registryCalls: Array<{
+  path: string;
+  body: Record<string, unknown>;
+}>;
 
 vi.mock("agents", () => ({
+  getAgentByName: async () => ({
+    fetch: async (req: Request) => {
+      registryCalls.push({
+        path: new URL(req.url).pathname,
+        body: (await req.json()) as Record<string, unknown>,
+      });
+      return new Response(JSON.stringify({ ok: true }));
+    },
+  }),
   Agent: class MockAgent {
     name = "test-doc";
-    env = {};
     ctx = {};
+
+    get env() {
+      return mockAgentEnv;
+    }
 
     sql(strings: TemplateStringsArray, ...values: unknown[]) {
       const query = strings.join("$").toLowerCase().trim();
@@ -147,6 +165,8 @@ describe("DocumentAgent", () => {
     vi.stubGlobal("WebSocket", MockSocket);
     mockSqlStore = new Map();
     mockConnectionMap = new Map();
+    mockAgentEnv = {};
+    registryCalls = [];
     nextConnId = 1;
 
     const mod = await import("../../../agents/document");
@@ -224,7 +244,7 @@ describe("DocumentAgent", () => {
     it("returns exists: false for a fresh agent", async () => {
       const res = await agent.onRequest(new Request("https://do/"));
       const body = await res.json();
-      expect(body).toEqual({ exists: false, createdAt: null });
+      expect(body).toEqual({ exists: false, createdAt: null, author: null });
     });
 
     it("returns exists: true with createdAt after POST", async () => {
@@ -237,6 +257,27 @@ describe("DocumentAgent", () => {
       expect(body.exists).toBe(true);
       expect(body.createdAt).toBeGreaterThanOrEqual(before);
       expect(body.createdAt).toBeLessThanOrEqual(after);
+    });
+
+    it("records the author from the x-mist-author header", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "x-mist-author": "pavel@vio.com" },
+        }),
+      );
+
+      const res = await agent.onRequest(new Request("https://do/"));
+      const body = (await res.json()) as { author: string | null };
+      expect(body.author).toBe("pavel@vio.com");
+    });
+
+    it("leaves author null when no header is present", async () => {
+      await agent.onRequest(new Request("https://do/", { method: "POST" }));
+
+      const res = await agent.onRequest(new Request("https://do/"));
+      const body = (await res.json()) as { author: string | null };
+      expect(body.author).toBeNull();
     });
   });
 
@@ -498,6 +539,214 @@ describe("DocumentAgent", () => {
       const conn = createConnection();
       await agent.onConnect(conn as never, {} as never);
       await agent.onClose(conn as never, 1000, "normal", true);
+    });
+  });
+
+  /* ================================================================ */
+  /*  Registry sync                                                    */
+  /* ================================================================ */
+
+  describe("registry sync", () => {
+    beforeEach(() => {
+      mockAgentEnv = { DocumentRegistry: {} };
+    });
+
+    it("registers a public document on POST with title and frontmatter author", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-mist-public": "true",
+          },
+          body: JSON.stringify({
+            content: "---\nauthor: Alice\n---\n# My Title\nbody text",
+          }),
+        }),
+      );
+
+      expect(registryCalls).toContainEqual({
+        path: "/upsert",
+        body: { id: "test-doc", title: "My Title", author: "Alice" },
+      });
+    });
+
+    it("falls back to first line title and null author", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-mist-public": "true",
+          },
+          body: JSON.stringify({ content: "just some text\nmore text" }),
+        }),
+      );
+
+      expect(registryCalls).toContainEqual({
+        path: "/upsert",
+        body: { id: "test-doc", title: "just some text", author: null },
+      });
+    });
+
+    it("registers an empty public document under its id", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "x-mist-public": "true" },
+        }),
+      );
+
+      expect(registryCalls).toContainEqual({
+        path: "/upsert",
+        body: { id: "test-doc", title: "test-doc", author: null },
+      });
+    });
+
+    it("does not list a document created without the public opt-in", async () => {
+      await agent.onRequest(new Request("https://do/", { method: "POST" }));
+
+      expect(registryCalls.map((c) => c.path)).not.toContain("/upsert");
+      expect(registryCalls).toContainEqual({
+        path: "/remove",
+        body: { id: "test-doc" },
+      });
+    });
+
+    it("does not sync when the registry binding is absent", async () => {
+      mockAgentEnv = {};
+      await agent.onRequest(new Request("https://do/", { method: "POST" }));
+      expect(registryCalls).toHaveLength(0);
+    });
+
+    it("debounces registry updates on edits into a single upsert", async () => {
+      vi.useFakeTimers();
+      try {
+        await agent.onRequest(
+          new Request("https://do/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-mist-public": "true",
+            },
+            body: JSON.stringify({ content: "# Original" }),
+          }),
+        );
+        registryCalls.length = 0;
+
+        const client = connectYjsClient();
+        const frag = client.doc.getXmlFragment("default");
+        for (const text of ["# Draft 1", "# Draft 2", "# Updated Title"]) {
+          const para = new Y.XmlElement("paragraph");
+          para.insert(0, [new Y.XmlText(text)]);
+          frag.insert(0, [para]);
+        }
+
+        // Nothing pushed before the debounce interval elapses
+        expect(registryCalls).toHaveLength(0);
+
+        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+
+        expect(registryCalls).toHaveLength(1);
+        expect(registryCalls[0]).toEqual({
+          path: "/upsert",
+          body: { id: "test-doc", title: "Updated Title", author: null },
+        });
+        cleanup(client);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("picks up frontmatter author added by an edit", async () => {
+      vi.useFakeTimers();
+      try {
+        await agent.onRequest(
+          new Request("https://do/", {
+            method: "POST",
+            headers: { "x-mist-public": "true" },
+          }),
+        );
+        registryCalls.length = 0;
+
+        const client = connectYjsClient();
+        const frag = client.doc.getXmlFragment("default");
+        const lines = ["---", "author: Bob", "---", "# Written"];
+        for (let i = 0; i < lines.length; i++) {
+          const para = new Y.XmlElement("paragraph");
+          para.insert(0, [new Y.XmlText(lines[i])]);
+          frag.insert(i, [para]);
+        }
+
+        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+
+        expect(registryCalls).toHaveLength(1);
+        expect(registryCalls[0]).toEqual({
+          path: "/upsert",
+          body: { id: "test-doc", title: "Written", author: "Bob" },
+        });
+        cleanup(client);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("lists a document toggled public from a client", async () => {
+      vi.useFakeTimers();
+      try {
+        await agent.onRequest(
+          new Request("https://do/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: "# Secret Draft" }),
+          }),
+        );
+        registryCalls.length = 0;
+
+        const client = connectYjsClient();
+        client.doc.getMap<string>("docState").set("public", "true");
+
+        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+
+        expect(registryCalls).toContainEqual({
+          path: "/upsert",
+          body: { id: "test-doc", title: "Secret Draft", author: null },
+        });
+        cleanup(client);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("withdraws a document toggled back to private", async () => {
+      vi.useFakeTimers();
+      try {
+        await agent.onRequest(
+          new Request("https://do/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-mist-public": "true",
+            },
+            body: JSON.stringify({ content: "# Was Public" }),
+          }),
+        );
+        registryCalls.length = 0;
+
+        const client = connectYjsClient();
+        client.doc.getMap<string>("docState").set("public", "false");
+
+        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+
+        expect(registryCalls).toContainEqual({
+          path: "/remove",
+          body: { id: "test-doc" },
+        });
+        expect(registryCalls.map((c) => c.path)).not.toContain("/upsert");
+        cleanup(client);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

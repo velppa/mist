@@ -6,25 +6,28 @@ import { YjsProvider } from "./yjs-provider";
 import { USER_COLOURS } from "~/shared/constants";
 import type { UserInfo, DocMode } from "~/shared/types";
 
-function randomUserInfo(): UserInfo {
+function randomUserInfo(name?: string | null): UserInfo {
   const idx = Math.floor(Math.random() * USER_COLOURS.length);
   const c = USER_COLOURS[idx];
   return {
-    name: `User ${Math.floor(Math.random() * 1000)}`,
+    // Signed-in users appear under their email; anonymous users keep
+    // the traditional random handle.
+    name: name ?? `User ${Math.floor(Math.random() * 1000)}`,
     color: c.color,
     colorLight: c.light,
   };
 }
 
-export function useYjsEditor(docId: string) {
+export function useYjsEditor(docId: string, userName?: string | null) {
   const doc = useMemo(() => new Y.Doc(), []);
   const awareness = useMemo(() => new Awareness(doc), [doc]);
-  const user = useMemo(() => randomUserInfo(), []);
+  const user = useMemo(() => randomUserInfo(userName), [userName]);
   const docState = useMemo(() => doc.getMap<string>("docState"), [doc]);
   const providerRef = useRef<YjsProvider | null>(null);
   const [synced, setSynced] = useState(false);
   const [mode, setModeState] = useState<DocMode>("edit");
   const [isOnboarding, setIsOnboarding] = useState(false);
+  const [isPublic, setIsPublicState] = useState(false);
 
   const socket = useAgent({
     agent: "document-agent",
@@ -39,6 +42,7 @@ export function useYjsEditor(docId: string) {
         setModeState(m);
       }
       setIsOnboarding(docState.get("onboarding") === "true");
+      setIsPublicState(docState.get("public") === "true");
     };
     docState.observe(observer);
     // Read initial value
@@ -51,6 +55,13 @@ export function useYjsEditor(docId: string) {
   const setMode = useCallback(
     (newMode: DocMode) => {
       docState.set("mode", newMode);
+    },
+    [docState],
+  );
+
+  const setPublic = useCallback(
+    (value: boolean) => {
+      docState.set("public", value ? "true" : "false");
     },
     [docState],
   );
@@ -70,5 +81,5 @@ export function useYjsEditor(docId: string) {
     };
   }, [socket, doc, awareness]);
 
-  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding };
+  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isPublic, setPublic };
 }

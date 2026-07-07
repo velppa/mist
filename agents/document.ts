@@ -1,11 +1,24 @@
-import { Agent } from "agents";
+import { Agent, getAgentByName } from "agents";
 import type { Connection, ConnectionContext, WSMessage } from "agents";
 import * as Y from "yjs";
 import * as syncProtocol from "y-protocols/sync";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
-import { MSG_SYNC, MSG_AWARENESS, DOC_FORMAT_VERSION } from "../app/shared/constants";
+import {
+  MSG_SYNC,
+  MSG_AWARENESS,
+  DOC_FORMAT_VERSION,
+  REGISTRY_AGENT_NAME,
+} from "../app/shared/constants";
+import { extractDocMeta } from "../app/lib/doc-meta";
+
+/**
+ * How long to wait after the last Yjs update before pushing fresh
+ * metadata to the registry. Keeps the registry off the hot path of
+ * every keystroke.
+ */
+export const REGISTRY_SYNC_DEBOUNCE_MS = 3000;
 
 /**
  * Durable Objects SQLite accepts Uint8Array for BLOB columns via the
@@ -16,9 +29,30 @@ function sqlBlob(data: Uint8Array): string {
   return data as unknown as string;
 }
 
+/**
+ * Extract the plain text of a Yjs XML node, ignoring formatting marks
+ * (CriticMarkup additions/deletions render as attributes, not text).
+ */
+function xmlNodeText(node: ReturnType<Y.XmlFragment["get"]>): string {
+  if (node instanceof Y.XmlText) {
+    return (node.toDelta() as Array<{ insert?: unknown }>)
+      .map((op) => (typeof op.insert === "string" ? op.insert : ""))
+      .join("");
+  }
+  if (node instanceof Y.XmlElement) {
+    let text = "";
+    for (let i = 0; i < node.length; i++) {
+      text += xmlNodeText(node.get(i));
+    }
+    return text;
+  }
+  return "";
+}
+
 class DocumentAgent extends Agent {
   private doc: Y.Doc | null = null;
   private awareness: awarenessProtocol.Awareness | null = null;
+  private registrySyncTimer: ReturnType<typeof setTimeout> | null = null;
 
   private ensureInitialised(): { doc: Y.Doc; awareness: awarenessProtocol.Awareness } {
     if (this.doc && this.awareness) {
@@ -53,9 +87,97 @@ class DocumentAgent extends Agent {
         INSERT INTO doc_state (key, value) VALUES ('state', ${sqlBlob(state)})
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `;
+
+      // Refresh the homepage registry entry, debounced so a burst of
+      // edits results in a single registry write.
+      this.scheduleRegistrySync();
     });
 
     return { doc: this.doc, awareness: this.awareness };
+  }
+
+  /** Plain markdown text of the document, one line per paragraph. */
+  private getPlainText(doc: Y.Doc): string {
+    const frag = doc.getXmlFragment("default");
+    const lines: string[] = [];
+    for (let i = 0; i < frag.length; i++) {
+      lines.push(xmlNodeText(frag.get(i)));
+    }
+    return lines.join("\n");
+  }
+
+  private scheduleRegistrySync() {
+    if (this.registrySyncTimer) {
+      clearTimeout(this.registrySyncTimer);
+    }
+    this.registrySyncTimer = setTimeout(() => {
+      this.registrySyncTimer = null;
+      void this.syncRegistry();
+    }, REGISTRY_SYNC_DEBOUNCE_MS);
+  }
+
+  /** Verified submitter email recorded at creation time, if any. */
+  private getStoredAuthor(): string | null {
+    const rows = this.sql<{ value: ArrayBuffer }>`
+      SELECT value FROM doc_state WHERE key = 'author'
+    `;
+    return rows.length > 0 ? new TextDecoder().decode(rows[0].value) : null;
+  }
+
+  /**
+   * Documents are private (unlisted) by default; the shared docState
+   * map carries the public opt-in so the toggle syncs to all clients.
+   */
+  private isPublic(doc: Y.Doc): boolean {
+    return doc.getMap<string>("docState").get("public") === "true";
+  }
+
+  /**
+   * Push this document's metadata to the singleton DocumentRegistry —
+   * or remove it, since only public documents may be listed. The
+   * verified submitter email takes precedence over a frontmatter
+   * author claim. Registry failures must never break document editing,
+   * so errors are swallowed.
+   */
+  private async syncRegistry() {
+    if (this.registrySyncTimer) {
+      clearTimeout(this.registrySyncTimer);
+      this.registrySyncTimer = null;
+    }
+
+    const namespace = (this.env as Env | undefined)?.DocumentRegistry;
+    if (!namespace) return;
+
+    try {
+      const { doc } = this.ensureInitialised();
+      const registry = await getAgentByName(namespace, REGISTRY_AGENT_NAME);
+
+      if (!this.isPublic(doc)) {
+        await registry.fetch(
+          new Request("https://registry/remove", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: this.name }),
+          }),
+        );
+        return;
+      }
+
+      const { title, author } = extractDocMeta(this.getPlainText(doc));
+      await registry.fetch(
+        new Request("https://registry/upsert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: this.name,
+            title: title ?? this.name,
+            author: this.getStoredAuthor() ?? author,
+          }),
+        }),
+      );
+    } catch {
+      // Registry is best-effort — the document itself is already safe
+    }
   }
 
   async onConnect(connection: Connection, _ctx: ConnectionContext) {
@@ -170,6 +292,23 @@ class DocumentAgent extends Agent {
         ON CONFLICT(key) DO UPDATE SET value = excluded.value
       `;
 
+      // Record the authenticated creator, if the worker verified one.
+      // The header is set only by trusted code (worker entry / new route),
+      // never passed through from clients.
+      const author = request.headers.get("x-mist-author");
+      if (author) {
+        this.sql`
+          INSERT INTO doc_state (key, value) VALUES ('author', ${sqlBlob(new TextEncoder().encode(author))})
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        `;
+      }
+
+      // Visibility opt-in (frontmatter `public: true` forwarded by /new).
+      // Lives in the shared docState map so clients see and toggle it.
+      if (request.headers.get("x-mist-public") === "true") {
+        doc.getMap<string>("docState").set("public", "true");
+      }
+
       // If the request has a JSON body with content, populate the Yjs doc
       const contentType = request.headers.get("Content-Type") || "";
       if (contentType.includes("application/json")) {
@@ -221,6 +360,10 @@ class DocumentAgent extends Agent {
         }
       }
 
+      // Register the new document immediately so it shows up on the
+      // homepage without waiting for the debounced sync.
+      await this.syncRegistry();
+
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -242,7 +385,9 @@ class DocumentAgent extends Agent {
           ? new Float64Array(createdAtRows[0].value)[0]
           : null;
 
-      return new Response(JSON.stringify({ exists, createdAt }), {
+      const author = this.getStoredAuthor();
+
+      return new Response(JSON.stringify({ exists, createdAt, author }), {
         headers: { "Content-Type": "application/json" },
       });
     }

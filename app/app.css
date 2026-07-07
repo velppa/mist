@@ -42,7 +42,6 @@ body {
 }
 
 .tiptap p {
-  max-width: 65ch;
   margin: 0;
 }
 
@@ -255,7 +254,6 @@ body {
 
 /* Preview styles */
 .preview {
-  max-width: 65ch;
   padding: 1.5rem;
   font-family: var(--font-serif);
   font-size: 1.15rem;

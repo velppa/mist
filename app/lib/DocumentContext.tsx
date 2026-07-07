@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router";
 import { getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
+import { parseViewMode, applyViewMode } from "~/lib/view-mode";
 import type { CapturedSelection, DocMode } from "~/shared/types";
 import type { MatchedThread } from "~/lib/comment-threads";
 import type { useYjsEditor } from "~/lib/useYjsEditor";
@@ -10,6 +12,8 @@ import { serializeWithCriticMarkup } from "~/lib/critic-serializer";
 export interface DocumentContextValue {
   docId: string;
   createdAt: number | null;
+  // Signed-in user's email, null when anonymous / SSO off
+  userEmail: string | null;
   yjs: ReturnType<typeof useYjsEditor>;
   editorInstance: TiptapEditor | null;
   markdown: string;
@@ -26,6 +30,10 @@ export interface DocumentContextValue {
   // Clean view
   cleanView: boolean;
   toggleCleanView: () => void;
+
+  // Visibility — public documents are listed on the homepage
+  isPublic: boolean;
+  togglePublic: () => void;
 
   // Comments
   commentActive: boolean;
@@ -69,23 +77,28 @@ export function useDocument(): DocumentContextValue {
 export function DocumentProvider({
   docId,
   createdAt,
+  userEmail = null,
   yjs,
   children,
 }: {
   docId: string;
   createdAt: number | null;
+  userEmail?: string | null;
   yjs: ReturnType<typeof useYjsEditor>;
   children: React.ReactNode;
 }) {
   const [markdown, setMarkdown] = useState("");
   const [editorInstance, setEditorInstance] = useState<TiptapEditor | null>(null);
-  const [previewToggled, setPreviewToggled] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [previewHeld, setPreviewHeld] = useState(false);
   const [commentActive, setCommentActive] = useState(false);
   const [commentSelection, setCommentSelection] = useState<CapturedSelection | null>(null);
   const [commentHighlight, setCommentHighlight] = useState<{ from: number; to: number } | null>(null);
   const [cleanView, setCleanView] = useState(true);
 
+  // The toggled view lives in the URL (?view=edit / preview by default) so
+  // links are shareable; the transient "hold to peek" state stays local.
+  const previewToggled = parseViewMode(searchParams) === "preview";
   const showPreview = previewToggled || previewHeld;
 
   const {
@@ -104,12 +117,23 @@ export function DocumentProvider({
   }, [yjs]);
 
   const togglePreview = useCallback(() => {
-    setPreviewToggled((v) => !v);
-  }, []);
+    setSearchParams(
+      (prev) =>
+        applyViewMode(
+          prev,
+          parseViewMode(prev) === "preview" ? "edit" : "preview",
+        ),
+      { replace: true, preventScrollReset: true },
+    );
+  }, [setSearchParams]);
 
   const toggleCleanView = useCallback(() => {
     setCleanView((v) => !v);
   }, []);
+
+  const togglePublic = useCallback(() => {
+    yjs.setPublic(!yjs.isPublic);
+  }, [yjs]);
 
   const handleEditorReady = useCallback((editor: TiptapEditor) => {
     setEditorInstance(editor);
@@ -218,6 +242,7 @@ export function DocumentProvider({
   const value: DocumentContextValue = {
     docId,
     createdAt,
+    userEmail,
     yjs,
     editorInstance,
     markdown,
@@ -228,6 +253,8 @@ export function DocumentProvider({
     setPreviewHeld,
     cleanView,
     toggleCleanView,
+    isPublic: yjs.isPublic,
+    togglePublic,
     commentActive,
     commentSelection,
     commentHighlight,

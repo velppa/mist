@@ -4,6 +4,8 @@ import type { Route } from "./+types/new";
 import { generateDocumentId } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { deserializeThreads } from "~/lib/thread-serialization";
+import { extractDocMeta } from "~/lib/doc-meta";
+import { authenticateNewRequest, type AuthEnv } from "~/lib/auth.server";
 
 const MAX_CONTENT_BYTES = 1_000_000; // 1 MB
 
@@ -20,6 +22,13 @@ export function loader() {
 
 export async function action({ request, context }: Route.ActionArgs) {
   try {
+    const { env } = getCloudflare(context);
+
+    const auth = await authenticateNewRequest(request, env as AuthEnv);
+    if (!auth.ok) {
+      return textError(auth.message, 401);
+    }
+
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_CONTENT_BYTES) {
       return textError("content too large (max 1MB)", 413);
@@ -36,14 +45,25 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
 
     const id = generateDocumentId();
-    const { env } = getCloudflare(context);
     const stub = await getAgentByName(env.DocumentAgent, id);
 
-    const init: RequestInit = { method: "POST" };
+    const headers = new Headers();
+    // Frontmatter is stripped before the content reaches the document, so
+    // frontmatter claims must be forwarded here; a verified email wins.
+    const meta = extractDocMeta(content);
+    const author = auth.email ?? meta.author;
+    if (author) {
+      headers.set("x-mist-author", author);
+    }
+    if (meta.isPublic) {
+      headers.set("x-mist-public", "true");
+    }
+
+    const init: RequestInit = { method: "POST", headers };
 
     if (content.trim()) {
       const { body, threads } = deserializeThreads(content);
-      init.headers = { "Content-Type": "application/json" };
+      headers.set("Content-Type", "application/json");
       init.body = JSON.stringify({ content: body, threads });
     }
 
