@@ -42,7 +42,7 @@ describe("SuggestionActions", () => {
 describe("ShareButton", () => {
   it("renders share trigger button", () => {
     const { getByLabelText } = renderWithDocument(createElement(ShareButton));
-    expect(getByLabelText("Share options")).toBeTruthy();
+    expect(getByLabelText("Document options")).toBeTruthy();
   });
 });
 

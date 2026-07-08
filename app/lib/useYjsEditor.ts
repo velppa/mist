@@ -5,6 +5,7 @@ import { Awareness } from "y-protocols/awareness";
 import { YjsProvider } from "./yjs-provider";
 import { USER_COLOURS } from "~/shared/constants";
 import type { UserInfo, DocMode } from "~/shared/types";
+import { LISTED_KEY, readListedFlag } from "~/shared/doc-state";
 
 function randomUserInfo(name?: string | null): UserInfo {
   const idx = Math.floor(Math.random() * USER_COLOURS.length);
@@ -27,7 +28,7 @@ export function useYjsEditor(docId: string, userName?: string | null) {
   const [synced, setSynced] = useState(false);
   const [mode, setModeState] = useState<DocMode>("edit");
   const [isOnboarding, setIsOnboarding] = useState(false);
-  const [isPublic, setIsPublicState] = useState(false);
+  const [isListed, setIsListedState] = useState(false);
 
   const socket = useAgent({
     agent: "document-agent",
@@ -42,7 +43,7 @@ export function useYjsEditor(docId: string, userName?: string | null) {
         setModeState(m);
       }
       setIsOnboarding(docState.get("onboarding") === "true");
-      setIsPublicState(docState.get("public") === "true");
+      setIsListedState(readListedFlag(docState));
     };
     docState.observe(observer);
     // Read initial value
@@ -59,9 +60,9 @@ export function useYjsEditor(docId: string, userName?: string | null) {
     [docState],
   );
 
-  const setPublic = useCallback(
+  const setListed = useCallback(
     (value: boolean) => {
-      docState.set("public", value ? "true" : "false");
+      docState.set(LISTED_KEY, value ? "true" : "false");
     },
     [docState],
   );
@@ -81,5 +82,5 @@ export function useYjsEditor(docId: string, userName?: string | null) {
     };
   }, [socket, doc, awareness]);
 
-  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isPublic, setPublic };
+  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, setListed };
 }

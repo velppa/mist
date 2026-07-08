@@ -9,9 +9,13 @@ import {
   MSG_SYNC,
   MSG_AWARENESS,
   DOC_FORMAT_VERSION,
-  REGISTRY_AGENT_NAME,
-} from "../app/shared/constants";
-import { extractDocMeta } from "../app/lib/doc-meta";
+  REGISTRY_AGENT_NAME, docFormat } from "../app/shared/constants";
+import { extractDocMetaForFormat } from "../app/lib/doc-meta";
+import {
+  LISTED_KEY,
+  readListedFlag,
+  migrateLegacyListedKey,
+} from "../app/shared/doc-state";
 
 /**
  * How long to wait after the last Yjs update before pushing fresh
@@ -33,18 +37,26 @@ function sqlBlob(data: Uint8Array): string {
  * Extract the plain text of a Yjs XML node, ignoring formatting marks
  * (CriticMarkup additions/deletions render as attributes, not text).
  */
-function xmlNodeText(node: ReturnType<Y.XmlFragment["get"]>): string {
+function xmlNodeText(node: ReturnType<Y.XmlFragment["get"]> | Y.XmlHook): string {
   if (node instanceof Y.XmlText) {
-    return (node.toDelta() as Array<{ insert?: unknown }>)
-      .map((op) => (typeof op.insert === "string" ? op.insert : ""))
+    return (node.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>)
+      .map((op) => {
+        // Comment bodies live in the text stream under a criticComment
+        // mark; they are annotations, not document content. y-tiptap
+        // suffixes repeatable mark keys ("criticComment--<id>").
+        const marked = op.attributes &&
+          Object.keys(op.attributes).some(
+            (k) => k === "criticComment" || k.startsWith("criticComment--"),
+          );
+        if (marked) return "";
+        return typeof op.insert === "string" ? op.insert : "";
+      })
       .join("");
   }
   if (node instanceof Y.XmlElement) {
-    let text = "";
-    for (let i = 0; i < node.length; i++) {
-      text += xmlNodeText(node.get(i));
-    }
-    return text;
+    // toArray, not get(i): indexed access walks the item list from the
+    // head each time, turning the scan quadratic on large documents.
+    return node.toArray().map(xmlNodeText).join("");
   }
   return "";
 }
@@ -53,6 +65,64 @@ class DocumentAgent extends Agent {
   private doc: Y.Doc | null = null;
   private awareness: awarenessProtocol.Awareness | null = null;
   private registrySyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastKnownListed = false;
+
+  /**
+   * Durable Object SQLite caps a single value at 2 MB, so the Yjs state
+   * blob is stored in fixed-size chunks (state:0, state:1, ...).
+   */
+  private static readonly STATE_CHUNK_BYTES = 1_500_000;
+
+  private saveState(state: Uint8Array) {
+    const chunkCount = Math.max(1, Math.ceil(state.length / DocumentAgent.STATE_CHUNK_BYTES));
+    for (let i = 0; i < chunkCount; i++) {
+      const chunk = state.subarray(
+        i * DocumentAgent.STATE_CHUNK_BYTES,
+        (i + 1) * DocumentAgent.STATE_CHUNK_BYTES,
+      );
+      const key = `state:${i}`;
+      this.sql`
+        INSERT INTO doc_state (key, value) VALUES (${key}, ${sqlBlob(chunk)})
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `;
+    }
+    // Drop stale higher chunks from a previously larger state, and the
+    // pre-chunking single-row format.
+    const rows = this.sql<{ key: string }>`
+      SELECT key FROM doc_state WHERE key LIKE 'state:%'
+    `;
+    for (const row of rows) {
+      const index = Number(row.key.slice("state:".length));
+      if (index >= chunkCount) {
+        this.sql`DELETE FROM doc_state WHERE key = ${row.key}`;
+      }
+    }
+    this.sql`DELETE FROM doc_state WHERE key = 'state'`;
+  }
+
+  private loadState(): Uint8Array | null {
+    const chunkRows = this.sql<{ key: string; value: ArrayBuffer }>`
+      SELECT key, value FROM doc_state WHERE key LIKE 'state:%'
+    `;
+    if (chunkRows.length > 0) {
+      chunkRows.sort(
+        (a, b) => Number(a.key.slice("state:".length)) - Number(b.key.slice("state:".length)),
+      );
+      const total = chunkRows.reduce((n, r) => n + r.value.byteLength, 0);
+      const state = new Uint8Array(total);
+      let offset = 0;
+      for (const row of chunkRows) {
+        state.set(new Uint8Array(row.value), offset);
+        offset += row.value.byteLength;
+      }
+      return state;
+    }
+    // Pre-chunking format: single 'state' row
+    const rows = this.sql<{ value: ArrayBuffer }>`
+      SELECT value FROM doc_state WHERE key = 'state'
+    `;
+    return rows.length > 0 && rows[0].value ? new Uint8Array(rows[0].value) : null;
+  }
 
   private ensureInitialised(): { doc: Y.Doc; awareness: awarenessProtocol.Awareness } {
     if (this.doc && this.awareness) {
@@ -71,26 +141,37 @@ class DocumentAgent extends Agent {
     `;
 
     // Load persisted state
-    const rows = this.sql<{ value: ArrayBuffer }>`
-      SELECT value FROM doc_state WHERE key = 'state'
-    `;
-
-    if (rows.length > 0 && rows[0].value) {
-      const state = new Uint8Array(rows[0].value);
+    const state = this.loadState();
+    if (state) {
       Y.applyUpdate(this.doc, state);
     }
+    // Rename migration: move the legacy "public" docState key to
+    // "listed" in place so clients only ever see the new key, and
+    // persist right away so the migration survives a restart even if
+    // the document is never edited again.
+    const docStateMap = this.doc.getMap<string>("docState");
+    let migrated = false;
+    this.doc.transact(() => {
+      migrated = migrateLegacyListedKey(docStateMap);
+    });
+    if (migrated) {
+      this.saveState(Y.encodeStateAsUpdate(this.doc));
+    }
+    this.lastKnownListed = this.isListed(this.doc);
 
     // Persist on every update
     this.doc.on("update", () => {
-      const state = Y.encodeStateAsUpdate(this.doc!);
-      this.sql`
-        INSERT INTO doc_state (key, value) VALUES ('state', ${sqlBlob(state)})
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-      `;
+      this.saveState(Y.encodeStateAsUpdate(this.doc!));
 
-      // Refresh the homepage registry entry, debounced so a burst of
-      // edits results in a single registry write.
-      this.scheduleRegistrySync();
+      // Visibility flips must reach the homepage immediately; ordinary
+      // edits stay debounced so a burst results in a single registry write.
+      const listed = this.isListed(this.doc!);
+      if (listed !== this.lastKnownListed) {
+        this.lastKnownListed = listed;
+        void this.syncRegistry();
+      } else {
+        this.scheduleRegistrySync();
+      }
     });
 
     return { doc: this.doc, awareness: this.awareness };
@@ -99,11 +180,7 @@ class DocumentAgent extends Agent {
   /** Plain markdown text of the document, one line per paragraph. */
   private getPlainText(doc: Y.Doc): string {
     const frag = doc.getXmlFragment("default");
-    const lines: string[] = [];
-    for (let i = 0; i < frag.length; i++) {
-      lines.push(xmlNodeText(frag.get(i)));
-    }
-    return lines.join("\n");
+    return frag.toArray().map(xmlNodeText).join("\n");
   }
 
   private scheduleRegistrySync() {
@@ -125,17 +202,18 @@ class DocumentAgent extends Agent {
   }
 
   /**
-   * Documents are private (unlisted) by default; the shared docState
-   * map carries the public opt-in so the toggle syncs to all clients.
+   * Documents are unlisted by default; the shared docState map carries
+   * the listing opt-in so the toggle syncs to all clients.
    */
-  private isPublic(doc: Y.Doc): boolean {
-    return doc.getMap<string>("docState").get("public") === "true";
+  private isListed(doc: Y.Doc): boolean {
+    return readListedFlag(doc.getMap<string>("docState"));
   }
 
   /**
-   * Push this document's metadata to the singleton DocumentRegistry —
-   * or remove it, since only public documents may be listed. The
-   * verified submitter email takes precedence over a frontmatter
+   * Push this document's metadata to the singleton DocumentRegistry.
+   * Unlisted documents stay registered (flagged) so their owner can
+   * find them under "My docs"; only the homepage filters on listed.
+   * The verified submitter email takes precedence over a frontmatter
    * author claim. Registry failures must never break document editing,
    * so errors are swallowed.
    */
@@ -152,18 +230,7 @@ class DocumentAgent extends Agent {
       const { doc } = this.ensureInitialised();
       const registry = await getAgentByName(namespace, REGISTRY_AGENT_NAME);
 
-      if (!this.isPublic(doc)) {
-        await registry.fetch(
-          new Request("https://registry/remove", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id: this.name }),
-          }),
-        );
-        return;
-      }
-
-      const { title, author } = extractDocMeta(this.getPlainText(doc));
+      const { title, author } = extractDocMetaForFormat(this.getPlainText(doc), docFormat(this.name));
       await registry.fetch(
         new Request("https://registry/upsert", {
           method: "POST",
@@ -172,11 +239,31 @@ class DocumentAgent extends Agent {
             id: this.name,
             title: title ?? this.name,
             author: this.getStoredAuthor() ?? author,
+            listed: this.isListed(doc),
           }),
         }),
       );
     } catch {
       // Registry is best-effort — the document itself is already safe
+    }
+  }
+
+  /** Withdraw this document from the registry entirely (deletion). */
+  private async removeFromRegistry() {
+    const namespace = (this.env as Env | undefined)?.DocumentRegistry;
+    if (!namespace) return;
+
+    try {
+      const registry = await getAgentByName(namespace, REGISTRY_AGENT_NAME);
+      await registry.fetch(
+        new Request("https://registry/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: this.name }),
+        }),
+      );
+    } catch {
+      // Best-effort; a stale entry points at a 404 doc at worst
     }
   }
 
@@ -303,10 +390,10 @@ class DocumentAgent extends Agent {
         `;
       }
 
-      // Visibility opt-in (frontmatter `public: true` forwarded by /new).
+      // Listing opt-in (frontmatter `listed: true` forwarded by /new).
       // Lives in the shared docState map so clients see and toggle it.
-      if (request.headers.get("x-mist-public") === "true") {
-        doc.getMap<string>("docState").set("public", "true");
+      if (request.headers.get("x-mist-listed") === "true") {
+        doc.getMap<string>("docState").set(LISTED_KEY, "true");
       }
 
       // If the request has a JSON body with content, populate the Yjs doc
@@ -314,40 +401,49 @@ class DocumentAgent extends Agent {
       if (contentType.includes("application/json")) {
         try {
           const body = await request.json() as { content?: string; threads?: unknown[]; onboarding?: boolean };
-          if (body.content) {
-            // Parse CriticMarkup and apply as marks on XmlText
-            const { parseCriticMarkupToContent } = await import("../app/lib/critic-parser");
-            const frag = doc.getXmlFragment("default");
-            if (frag.length === 0) {
-              const lines = body.content.split("\n");
-              for (const line of lines) {
-                const { cleanText, marks } = parseCriticMarkupToContent(line);
-                const para = new Y.XmlElement("paragraph");
-                const ytext = new Y.XmlText(cleanText);
-                // Apply marks via Yjs formatting attributes
-                for (const mark of marks) {
-                  const attrs: Record<string, Record<string, unknown>> = {};
-                  attrs[mark.type] = mark.attrs ?? {};
-                  ytext.format(mark.from, mark.to - mark.from, attrs);
+          // One transaction for the whole initial body: without it every
+          // paragraph insert fires an update event, each re-encoding and
+          // persisting the full state — quadratic on large uploads.
+          const { parseCriticMarkupToContent } = await import("../app/lib/critic-parser");
+          doc.transact(() => {
+            if (body.content) {
+              // Parse CriticMarkup and apply as marks on XmlText
+              const frag = doc.getXmlFragment("default");
+              if (frag.length === 0) {
+                const lines = body.content!.split("\n");
+                // Build all paragraphs first and insert once: indexed
+                // inserts walk the item list from the head, so per-line
+                // appends are quadratic on large documents.
+                const paras = lines.map((line) => {
+                  const { cleanText, marks } = parseCriticMarkupToContent(line);
+                  const para = new Y.XmlElement("paragraph");
+                  const ytext = new Y.XmlText(cleanText);
+                  // Apply marks via Yjs formatting attributes
+                  for (const mark of marks) {
+                    const attrs: Record<string, Record<string, unknown>> = {};
+                    attrs[mark.type] = mark.attrs ?? {};
+                    ytext.format(mark.from, mark.to - mark.from, attrs);
+                  }
+                  para.insert(0, [ytext]);
+                  return para;
+                });
+                frag.insert(0, paras);
+              }
+            }
+            if (body.threads && Array.isArray(body.threads)) {
+              const threadsMap = doc.getMap<string>("threads");
+              for (const thread of body.threads) {
+                const t = thread as { id?: string };
+                if (t.id) {
+                  threadsMap.set(t.id, JSON.stringify(thread));
                 }
-                para.insert(0, [ytext]);
-                frag.insert(frag.length, [para]);
               }
             }
-          }
-          if (body.threads && Array.isArray(body.threads)) {
-            const threadsMap = doc.getMap<string>("threads");
-            for (const thread of body.threads) {
-              const t = thread as { id?: string };
-              if (t.id) {
-                threadsMap.set(t.id, JSON.stringify(thread));
-              }
+            if (body.onboarding) {
+              const docState = doc.getMap<string>("docState");
+              docState.set("onboarding", "true");
             }
-          }
-          if (body.onboarding) {
-            const docState = doc.getMap<string>("docState");
-            docState.set("onboarding", "true");
-          }
+          });
         } catch (err) {
           // If it's an unsupported CriticMarkup error, return it
           if (err instanceof Error && err.message.includes("Unsupported CriticMarkup")) {
@@ -387,7 +483,47 @@ class DocumentAgent extends Agent {
 
       const author = this.getStoredAuthor();
 
-      return new Response(JSON.stringify({ exists, createdAt, author }), {
+      // Same title derivation the registry uses, so the page <title>
+      // matches the "My docs" listing.
+      const { doc } = this.ensureInitialised();
+      const text = this.getPlainText(doc);
+      const { title } = extractDocMetaForFormat(text, docFormat(this.name));
+
+      const body: Record<string, unknown> = { exists, createdAt, author, title };
+      // The /raw route needs the verbatim document text
+      if (new URL(request.url).searchParams.get("include") === "text") {
+        body.text = text;
+      }
+
+      return new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (request.method === "DELETE") {
+      // Disconnect editors first so no update re-persists state below
+      for (const conn of this.getConnections()) {
+        conn.close();
+      }
+      if (this.registrySyncTimer) {
+        clearTimeout(this.registrySyncTimer);
+        this.registrySyncTimer = null;
+      }
+      this.doc = null;
+      this.awareness = null;
+      this.lastKnownListed = false;
+
+      // The table may not exist yet when deleting a never-created doc
+      this.sql`
+        CREATE TABLE IF NOT EXISTS doc_state (
+          key TEXT PRIMARY KEY,
+          value BLOB
+        )
+      `;
+      this.sql`DELETE FROM doc_state`;
+      await this.removeFromRegistry();
+
+      return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });
     }

@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router";
 import { useDocument } from "~/lib/DocumentContext";
+import { parseViewMode } from "~/lib/view-mode";
 
 function Spinner() {
   return (
@@ -29,8 +31,9 @@ function Spinner() {
 export default function PreviewToggle() {
   const { showPreview: active, togglePreview: onToggle, setPreviewHeld: onHold, yjs } = useDocument();
   const synced = yjs.synced;
-  const [hovering, setHovering] = useState(false);
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Label states the action; it follows the URL mode, not the transient peek
+  const [searchParams] = useSearchParams();
+  const previewMode = parseViewMode(searchParams) === "preview";
 
   // P key hold: show preview while held (only when editor not focused)
   const handleKeyDown = useCallback(
@@ -61,30 +64,9 @@ export default function PreviewToggle() {
     };
   }, [handleKeyDown, handleKeyUp]);
 
-  // Hover: show preview after 500ms
-  function handleMouseEnter() {
-    hoverTimer.current = setTimeout(() => {
-      setHovering(true);
-      onHold(true);
-    }, 500);
-  }
-
-  function handleMouseLeave() {
-    if (hoverTimer.current) {
-      clearTimeout(hoverTimer.current);
-      hoverTimer.current = null;
-    }
-    if (hovering) {
-      setHovering(false);
-      onHold(false);
-    }
-  }
-
   return (
     <button
       onClick={onToggle}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
       className={`flex h-24 w-full cursor-pointer items-center justify-center text-sm uppercase tracking-wider transition-colors ${
         active
           ? "bg-ink text-paper"
@@ -92,7 +74,7 @@ export default function PreviewToggle() {
       }`}
     >
       {!synced && !active && <Spinner />}
-      Preview
+      {previewMode ? "Edit" : "Preview"}
     </button>
   );
 }

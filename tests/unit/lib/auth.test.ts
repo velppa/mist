@@ -182,6 +182,7 @@ describe("configuration checks", () => {
 
   it("requiresLogin exempts agents, auth, and /new paths", () => {
     expect(requiresLogin("/")).toBe(true);
+    expect(requiresLogin("/raw/abcd1234.html")).toBe(true);
     expect(requiresLogin("/docs/abcd1234")).toBe(true);
     expect(requiresLogin("/agents/document-agent/abcd1234")).toBe(false);
     expect(requiresLogin("/auth/login")).toBe(false);

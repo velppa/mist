@@ -35,7 +35,7 @@ You can write **bold text**, _italic text_, ~~strikethrough~~, and `inline code`
 
 ## Suggestions
 
-Switch from **Edit Mode** to **Suggest Changes** in the sidebar (or bottom panel on mobile). Here is an example of {++added text++} that a user inserted. And here is some {--removed text--} that was marked for deletion.
+Switch **Suggest Changes** in the sidebar (or bottom panel on mobile) to enter suggestions mode. Here is an example of {++added text++} that a user inserted. And here is some {--removed text--} that was marked for deletion.
 
 ## Comments
 

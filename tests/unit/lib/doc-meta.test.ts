@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractDocMeta } from "~/lib/doc-meta";
+import { extractDocMeta, extractDocMetaForFormat } from "~/lib/doc-meta";
 
 describe("extractDocMeta", () => {
   describe("title", () => {
@@ -81,24 +81,69 @@ describe("extractDocMeta", () => {
     });
   });
 
-  describe("public", () => {
+  describe("listed", () => {
     it("is false by default", () => {
-      expect(extractDocMeta("# Doc").isPublic).toBe(false);
+      expect(extractDocMeta("# Doc").isListed).toBe(false);
     });
 
-    it("reads public: true from frontmatter", () => {
+    it("reads listed: true from frontmatter", () => {
+      const md = "---\nlisted: true\n---\n# Doc";
+      expect(extractDocMeta(md).isListed).toBe(true);
+    });
+
+    it("ignores the pre-rename public: true spelling", () => {
       const md = "---\npublic: true\n---\n# Doc";
-      expect(extractDocMeta(md).isPublic).toBe(true);
+      expect(extractDocMeta(md).isListed).toBe(false);
     });
 
-    it("is false for public: false", () => {
-      const md = "---\npublic: false\n---\n# Doc";
-      expect(extractDocMeta(md).isPublic).toBe(false);
+    it("is false for listed: false", () => {
+      const md = "---\nlisted: false\n---\n# Doc";
+      expect(extractDocMeta(md).isListed).toBe(false);
     });
 
-    it("is false for non-boolean public values", () => {
-      const md = '---\npublic: "yes"\n---\n# Doc';
-      expect(extractDocMeta(md).isPublic).toBe(false);
+    it("is false for non-boolean listed values", () => {
+      const md = '---\nlisted: "yes"\n---\n# Doc';
+      expect(extractDocMeta(md).isListed).toBe(false);
     });
+  });
+});
+
+describe("extractDocMetaForFormat", () => {
+  it("txt: first non-empty line is the title, no frontmatter semantics", () => {
+    const meta = extractDocMetaForFormat("\n\nshopping list\nmilk", "txt");
+    expect(meta).toEqual({ title: "shopping list", author: null, isListed: false });
+  });
+
+  it("txt: frontmatter-looking text is just text", () => {
+    const meta = extractDocMetaForFormat("---\nauthor: a@b.c\nlisted: true\n---\nbody", "txt");
+    expect(meta.title).toBe("---");
+    expect(meta.author).toBeNull();
+    expect(meta.isListed).toBe(false);
+  });
+
+  it("html: <title> wins", () => {
+    const meta = extractDocMetaForFormat(
+      "<html><head><title>My Page</title></head><body><h1>Other</h1></body></html>",
+      "html",
+    );
+    expect(meta.title).toBe("My Page");
+  });
+
+  it("html: falls back to first h1, tags stripped", () => {
+    const meta = extractDocMetaForFormat(
+      "<body><h1>Hello <em>world</em></h1></body>",
+      "html",
+    );
+    expect(meta.title).toBe("Hello world");
+  });
+
+  it("html: null title when neither present", () => {
+    expect(extractDocMetaForFormat("<p>hi</p>", "html").title).toBeNull();
+  });
+
+  it("md: delegates to the markdown extractor", () => {
+    const meta = extractDocMetaForFormat("---\nauthor: a@b.c\n---\n# T", "md");
+    expect(meta.title).toBe("T");
+    expect(meta.author).toBe("a@b.c");
   });
 });

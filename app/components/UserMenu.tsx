@@ -1,15 +1,22 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Link } from "react-router";
-import { useDocument } from "~/lib/DocumentContext";
 
-/** Signed-in user's menu: shown only when a session email exists. */
-export default function UserMenu() {
-  const { userEmail } = useDocument();
-
+/**
+ * Signed-in user's menu: shown only when a session email exists.
+ * The default wrapper matches the doc-page header; pass a className
+ * to restyle it for other contexts (e.g. the homepage corner).
+ */
+export default function UserMenu({
+  userEmail,
+  className = "shrink-0 border-l border-border",
+}: {
+  userEmail: string | null;
+  className?: string;
+}) {
   if (!userEmail) return null;
 
   return (
-    <div className="shrink-0 border-l border-border">
+    <div className={className}>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button
@@ -28,6 +35,14 @@ export default function UserMenu() {
             align="end"
             sideOffset={4}
           >
+            <DropdownMenu.Item asChild>
+              <Link
+                to="/my"
+                className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
+              >
+                My docs
+              </Link>
+            </DropdownMenu.Item>
             <DropdownMenu.Item asChild>
               <Link
                 to="/tokens"

@@ -33,6 +33,8 @@ export interface RegistryEntry {
   id: string;
   title: string;
   author: string | null;
+  /** Listed entries appear on the homepage; unlisted only under "My docs". */
+  listed: boolean;
   createdAt: number;
   updatedAt: number;
 }

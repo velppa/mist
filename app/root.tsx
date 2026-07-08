@@ -12,18 +12,7 @@ import type { Route } from "./+types/root";
 import Fathom from "~/components/Fathom";
 import "./app.css";
 
-export const links: Route.LinksFunction = () => [
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  {
-    rel: "preconnect",
-    href: "https://fonts.gstatic.com",
-    crossOrigin: "anonymous",
-  },
-  {
-    rel: "stylesheet",
-    href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap",
-  },
-];
+export const links: Route.LinksFunction = () => [];
 
 const themeScript = `(function(){var t=localStorage.getItem('mist-theme')||'auto';document.documentElement.setAttribute('data-theme',t)})()`;
 

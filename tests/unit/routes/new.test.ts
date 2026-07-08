@@ -172,8 +172,8 @@ mist:
     expect(mockAgentFetch).not.toHaveBeenCalled();
   });
 
-  it("returns 413 when content exceeds 1MB", async () => {
-    const bigContent = "x".repeat(1_000_001);
+  it("returns 413 when content exceeds 20MB", async () => {
+    const bigContent = "x".repeat(20_000_001);
     const request = postRequest(bigContent);
     const response = await action({ request, context } as Parameters<typeof action>[0]);
 
@@ -183,9 +183,9 @@ mist:
     expect(mockAgentFetch).not.toHaveBeenCalled();
   });
 
-  it("returns 413 when content-length header exceeds 1MB", async () => {
+  it("returns 413 when content-length header exceeds 20MB", async () => {
     const request = postRequest("small body", {
-      "content-length": "2000000",
+      "content-length": "30000000",
     });
     const response = await action({ request, context } as Parameters<typeof action>[0]);
 
@@ -306,18 +306,18 @@ describe("POST /new authentication", () => {
     expect(agentRequest.headers.get("x-mist-author")).toBe("alice@vio.com");
   });
 
-  it("forwards frontmatter public: true as x-mist-public", async () => {
+  it("forwards frontmatter listed: true as x-mist-listed", async () => {
     const response = await action({
-      request: postRequest("---\npublic: true\n---\n# Doc"),
+      request: postRequest("---\nlisted: true\n---\n# Doc"),
       context,
     } as Parameters<typeof action>[0]);
 
     expect(response.status).toBe(201);
     const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    expect(agentRequest.headers.get("x-mist-public")).toBe("true");
+    expect(agentRequest.headers.get("x-mist-listed")).toBe("true");
   });
 
-  it("omits x-mist-public without a frontmatter opt-in", async () => {
+  it("omits x-mist-listed without a frontmatter opt-in", async () => {
     const response = await action({
       request: postRequest("# Doc"),
       context,
@@ -325,7 +325,7 @@ describe("POST /new authentication", () => {
 
     expect(response.status).toBe(201);
     const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    expect(agentRequest.headers.get("x-mist-public")).toBeNull();
+    expect(agentRequest.headers.get("x-mist-listed")).toBeNull();
   });
 
   it("returns 401 when tokens configured and no Authorization header", async () => {
@@ -415,6 +415,95 @@ describe("POST /new authentication", () => {
     } as Parameters<typeof action>[0]);
 
     expect(response.status).toBe(401);
+    expect(mockAgentFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /new formats", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAgentFetch.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    delete mockEnv.MIST_API_TOKENS;
+    delete mockEnv.ONELOGIN_SUBDOMAIN;
+    delete mockEnv.ONELOGIN_CLIENT_ID;
+    delete mockEnv.ONELOGIN_CLIENT_SECRET;
+    delete mockEnv.SESSION_SECRET;
+  });
+
+  function formatRequest(body: string, format?: string) {
+    const url = format
+      ? `https://mist.example.com/new?format=${format}`
+      : "https://mist.example.com/new";
+    return new Request(url, { method: "POST", body });
+  }
+
+  it("?format=txt appends the .txt suffix", async () => {
+    const response = await action({
+      request: formatRequest("plain text", "txt"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234.txt");
+  });
+
+  it("?format=html appends the .html suffix and stores body verbatim", async () => {
+    const html = "---\nlisted: true\n---\n<html><body>hi</body></html>";
+    const response = await action({
+      request: formatRequest(html, "html"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234.html");
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    const body = await agentRequest.json();
+    // No frontmatter handling for non-markdown notes
+    expect(body.content).toBe(html);
+    expect(body.threads).toBeUndefined();
+    expect(agentRequest.headers.get("x-mist-listed")).toBeNull();
+  });
+
+  it("sniffs html from a doctype body without a format param", async () => {
+    const response = await action({
+      request: formatRequest("  <!DOCTYPE html><html></html>"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234.html");
+  });
+
+  it("explicit ?format=md beats the html sniff", async () => {
+    const response = await action({
+      request: formatRequest("<html>as markdown</html>", "md"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234\n");
+  });
+
+  it("defaults to markdown", async () => {
+    const response = await action({
+      request: formatRequest("# heading"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234\n");
+  });
+
+  it("rejects an unknown format value", async () => {
+    const response = await action({
+      request: formatRequest("body", "text"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("unknown format");
     expect(mockAgentFetch).not.toHaveBeenCalled();
   });
 });

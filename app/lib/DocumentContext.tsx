@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useMemo } from "react";
+import { createContext, useContext, useState, useCallback, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
 import { parseViewMode, applyViewMode } from "~/lib/view-mode";
@@ -8,6 +8,9 @@ import type { useYjsEditor } from "~/lib/useYjsEditor";
 import { useThreads } from "~/lib/useThreads";
 import { findCommentTextAtCursor } from "~/lib/comment-threads";
 import { serializeWithCriticMarkup } from "~/lib/critic-serializer";
+
+export type DocWidth = "full" | "120" | "65";
+const DOC_WIDTHS: DocWidth[] = ["full", "120", "65"];
 
 export interface DocumentContextValue {
   docId: string;
@@ -31,9 +34,13 @@ export interface DocumentContextValue {
   cleanView: boolean;
   toggleCleanView: () => void;
 
-  // Visibility — public documents are listed on the homepage
-  isPublic: boolean;
-  togglePublic: () => void;
+  // Layout: doc-area column width
+  docWidth: DocWidth;
+  setDocWidth: (w: DocWidth) => void;
+
+  // Visibility — listed documents appear on the homepage
+  isListed: boolean;
+  toggleListed: () => void;
 
   // Comments
   commentActive: boolean;
@@ -95,6 +102,13 @@ export function DocumentProvider({
   const [commentSelection, setCommentSelection] = useState<CapturedSelection | null>(null);
   const [commentHighlight, setCommentHighlight] = useState<{ from: number; to: number } | null>(null);
   const [cleanView, setCleanView] = useState(true);
+  // Per-user preference, remembered across documents. SSR renders the
+  // default; the stored value is applied after mount so hydration matches.
+  const [docWidth, setDocWidthState] = useState<DocWidth>("120");
+  useEffect(() => {
+    const stored = localStorage.getItem("mist-doc-width") as DocWidth | null;
+    if (stored && DOC_WIDTHS.includes(stored)) setDocWidthState(stored); // eslint-disable-line react-hooks/set-state-in-effect
+  }, []);
 
   // The toggled view lives in the URL (?view=edit / preview by default) so
   // links are shareable; the transient "hold to peek" state stays local.
@@ -131,8 +145,13 @@ export function DocumentProvider({
     setCleanView((v) => !v);
   }, []);
 
-  const togglePublic = useCallback(() => {
-    yjs.setPublic(!yjs.isPublic);
+  const setDocWidth = useCallback((w: DocWidth) => {
+    localStorage.setItem("mist-doc-width", w);
+    setDocWidthState(w);
+  }, []);
+
+  const toggleListed = useCallback(() => {
+    yjs.setListed(!yjs.isListed);
   }, [yjs]);
 
   const handleEditorReady = useCallback((editor: TiptapEditor) => {
@@ -183,9 +202,10 @@ export function DocumentProvider({
 
   const clearDocument = useCallback(() => {
     if (!editorInstance) return;
-    // Wrap in a Yjs transaction so all changes are atomic —
-    // clearing threads before content prevents reconcile from
-    // re-creating thread entries from still-present inline marks.
+    // Content first: document marks are the ground truth for threads, so
+    // marks must be gone before the map is emptied — otherwise reconcile
+    // re-creates thread entries from the still-present inline marks.
+    editorInstance.commands.clearContent();
     yjs.doc.transact(() => {
       const threadsMap = yjs.doc.getMap<string>("threads");
       const keys = Array.from(threadsMap.keys());
@@ -193,7 +213,6 @@ export function DocumentProvider({
       yjs.docState.delete("onboarding");
       yjs.docState.set("mode", "edit");
     });
-    editorInstance.commands.clearContent();
     // Reset local UI state
     setCommentActive(false);
     setCommentSelection(null);
@@ -253,8 +272,10 @@ export function DocumentProvider({
     setPreviewHeld,
     cleanView,
     toggleCleanView,
-    isPublic: yjs.isPublic,
-    togglePublic,
+    docWidth,
+    setDocWidth,
+    isListed: yjs.isListed,
+    toggleListed,
     commentActive,
     commentSelection,
     commentHighlight,

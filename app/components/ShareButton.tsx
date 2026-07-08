@@ -1,11 +1,19 @@
 import { useState, useCallback } from "react";
+import { useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { serializeThreads } from "~/lib/thread-serialization";
 import { useDocument } from "~/lib/DocumentContext";
 
 export default function ShareButton() {
-  const { docId, markdown, threads, isPublic, togglePublic } = useDocument();
+  const { docId, markdown, threads, isListed, toggleListed } = useDocument();
   const [copied, setCopied] = useState(false);
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const navigate = useNavigate();
+
+  const handleDelete = useCallback(async () => {
+    await fetch(`/agents/document-agent/${docId}`, { method: "DELETE" });
+    navigate("/");
+  }, [docId, navigate]);
 
   const handleCopy = useCallback(async () => {
     await navigator.clipboard.writeText(window.location.href);
@@ -25,13 +33,17 @@ export default function ShareButton() {
   }, [docId, markdown, threads]);
 
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root
+      onOpenChange={(open) => {
+        if (!open) setDeleteArmed(false);
+      }}
+    >
       <DropdownMenu.Trigger asChild>
         <button
           className="flex h-full cursor-pointer items-center gap-1 px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
-          aria-label="Share options"
+          aria-label="Document options"
         >
-          Share
+          Doc
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="6 9 12 15 18 9" />
           </svg>
@@ -55,15 +67,40 @@ export default function ShareButton() {
           >
             Download
           </DropdownMenu.Item>
+          <DropdownMenu.Item asChild>
+            <a
+              href={`/raw/${docId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
+            >
+              Raw
+            </a>
+          </DropdownMenu.Item>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.CheckboxItem
-            checked={isPublic}
-            onCheckedChange={togglePublic}
+            checked={isListed}
+            onCheckedChange={toggleListed}
             onSelect={(e) => e.preventDefault()}
             className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
           >
-            {isPublic ? "Public ✓" : "Public"}
+            {isListed ? "Listed ✓" : "Listed"}
           </DropdownMenu.CheckboxItem>
+          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+          <DropdownMenu.Item
+            onSelect={(e) => {
+              // First click arms, second click deletes; closing disarms
+              e.preventDefault();
+              if (deleteArmed) {
+                void handleDelete();
+              } else {
+                setDeleteArmed(true);
+              }
+            }}
+            className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm text-coral outline-none data-[highlighted]:bg-border"
+          >
+            {deleteArmed ? "Confirm delete?" : "Delete"}
+          </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

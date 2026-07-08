@@ -41,8 +41,7 @@ describe("MobilePanel", () => {
     );
 
     // Editing tab is active by default
-    // ModeToggle shows "Edit mode" when mode is "edit"
-    expect(getByText("Edit mode")).toBeTruthy();
+    expect(getByText("Suggest changes")).toBeTruthy();
     expect(getByLabelText("Toggle suggest mode")).toBeTruthy();
   });
 

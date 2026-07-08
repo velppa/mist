@@ -48,34 +48,48 @@ vi.mock("agents", () => ({
     }
 
     sql(strings: TemplateStringsArray, ...values: unknown[]) {
-      const query = strings.join("$").toLowerCase().trim();
+      const query = strings.join("$").toLowerCase().replace(/\s+/g, " ").trim();
+
+      // The key is either a literal in the query text or a string parameter
+      const literalKey = query.match(/key\s*=\s*'([\w:]+)'/)?.[1];
+      const paramKey = values.find((v): v is string => typeof v === "string");
+      const key = literalKey ?? paramKey;
 
       if (query.includes("create table")) return [];
 
-      if (query.includes("delete from doc_state")) {
-        mockSqlStore.clear();
+      if (query.startsWith("delete from doc_state")) {
+        if (query.includes("where")) {
+          if (key) mockSqlStore.delete(key);
+        } else {
+          mockSqlStore.clear();
+        }
         return [];
       }
 
       if (query.includes("select") && query.includes("from doc_state")) {
-        const match = query.match(/key\s*=\s*'(\w+)'/);
-        if (match) {
-          const buf = mockSqlStore.get(match[1]);
-          if (buf) return [{ value: buf }];
+        const likeMatch = query.match(/key like '([\w:]+)%'/);
+        if (likeMatch) {
+          const prefix = likeMatch[1];
+          return [...mockSqlStore.entries()]
+            .filter(([k]) => k.startsWith(prefix))
+            .map(([k, v]) => ({ key: k, value: v }));
+        }
+        if (key) {
+          const buf = mockSqlStore.get(key);
+          if (buf) return [{ key, value: buf }];
         }
         return [];
       }
 
       if (query.includes("insert into doc_state")) {
-        const match = query.match(/values\s*\(\s*'(\w+)'/i);
-        if (match) {
-          const val = values[0];
-          if (val instanceof Uint8Array) {
-            mockSqlStore.set(
-              match[1],
-              val.buffer.slice(val.byteOffset, val.byteOffset + val.byteLength),
-            );
-          }
+        const insertKey =
+          query.match(/values\s*\(\s*'([\w:]+)'/)?.[1] ?? paramKey;
+        const blob = values.find((v): v is Uint8Array => v instanceof Uint8Array);
+        if (insertKey && blob) {
+          mockSqlStore.set(
+            insertKey,
+            blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength),
+          );
         }
         return [];
       }
@@ -240,11 +254,83 @@ describe("DocumentAgent", () => {
   /*  HTTP GET                                                         */
   /* ================================================================ */
 
+  describe("plain text extraction", () => {
+    it("excludes comment bodies from the raw text", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "css {==border-radius: 12px;==}{>>Too small<<} more",
+          }),
+        }),
+      );
+      const body = (await agent
+        .onRequest(new Request("https://do/?include=text"))
+        .then((r) => r.json())) as { text?: string };
+      expect(body.text).toContain("border-radius: 12px;");
+      expect(body.text).not.toContain("Too small");
+    });
+
+    it("excludes UI-added comments (suffixed y-tiptap mark keys)", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "hello world" }),
+        }),
+      );
+      // Simulate the editor adding a comment: y-tiptap suffixes the
+      // mark key with a discriminator for repeatable marks.
+      const client = connectYjsClient();
+      const frag = client.doc.getXmlFragment("default");
+      const para = frag.get(0) as Y.XmlElement;
+      const ytext = para.get(0) as Y.XmlText;
+      client.doc.transact(() => {
+        ytext.insert(0, "UICOMMENT", { "criticComment--abc123": {} });
+      });
+      await Promise.resolve();
+
+      const body = (await agent
+        .onRequest(new Request("https://do/?include=text"))
+        .then((r) => r.json())) as { text?: string };
+      expect(body.text).toContain("hello world");
+      expect(body.text).not.toContain("UICOMMENT");
+      cleanup(client);
+    });
+  });
+
+  describe("state chunking", () => {
+    it("persists content larger than one chunk row and reloads it", async () => {
+      // ~3 MB of text spans multiple 1.5 MB state chunks
+      const bigContent = "line of text\n".repeat(240_000);
+      const res = await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: bigContent }),
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      const chunkKeys = [...mockSqlStore.keys()].filter((k) => k.startsWith("state:"));
+      expect(chunkKeys.length).toBeGreaterThan(1);
+      expect(mockSqlStore.has("state")).toBe(false);
+
+      // A fresh agent over the same storage reconstructs the document
+      const reloaded = new DocumentAgent({} as never, {} as never);
+      const body = (await reloaded
+        .onRequest(new Request("https://do/?include=text"))
+        .then((r) => r.json())) as { text?: string };
+      expect(body.text?.length).toBeGreaterThan(3_000_000);
+    });
+  });
+
   describe("GET /", () => {
     it("returns exists: false for a fresh agent", async () => {
       const res = await agent.onRequest(new Request("https://do/"));
       const body = await res.json();
-      expect(body).toEqual({ exists: false, createdAt: null, author: null });
+      expect(body).toEqual({ exists: false, createdAt: null, author: null, title: null });
     });
 
     it("returns exists: true with createdAt after POST", async () => {
@@ -409,6 +495,58 @@ describe("DocumentAgent", () => {
   /*  Unsupported HTTP methods                                         */
   /* ================================================================ */
 
+  describe("DELETE /", () => {
+    beforeEach(() => {
+      mockAgentEnv = { DocumentRegistry: {} };
+    });
+
+    it("wipes the document and withdraws it from the registry", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-mist-listed": "true",
+          },
+          body: JSON.stringify({ content: "# Doomed" }),
+        }),
+      );
+      registryCalls.length = 0;
+
+      const res = await agent.onRequest(
+        new Request("https://do/", { method: "DELETE" }),
+      );
+      expect(res.status).toBe(200);
+
+      expect(registryCalls).toContainEqual({
+        path: "/remove",
+        body: { id: "test-doc" },
+      });
+
+      const getRes = await agent.onRequest(new Request("https://do/"));
+      const body = (await getRes.json()) as { exists: boolean };
+      expect(body.exists).toBe(false);
+    });
+
+    it("closes connected editors", async () => {
+      await agent.onRequest(new Request("https://do/", { method: "POST" }));
+      const client = connectYjsClient();
+      const serverConn = [...mockConnectionMap.values()][0];
+
+      await agent.onRequest(new Request("https://do/", { method: "DELETE" }));
+
+      expect(serverConn.closed).toBe(true);
+      cleanup(client);
+    });
+
+    it("deleting a never-created document succeeds", async () => {
+      const res = await agent.onRequest(
+        new Request("https://do/", { method: "DELETE" }),
+      );
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe("unsupported methods", () => {
     it("returns 404 for PUT", async () => {
       const res = await agent.onRequest(
@@ -551,13 +689,13 @@ describe("DocumentAgent", () => {
       mockAgentEnv = { DocumentRegistry: {} };
     });
 
-    it("registers a public document on POST with title and frontmatter author", async () => {
+    it("registers a listed document on POST with title and frontmatter author", async () => {
       await agent.onRequest(
         new Request("https://do/", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-mist-public": "true",
+            "x-mist-listed": "true",
           },
           body: JSON.stringify({
             content: "---\nauthor: Alice\n---\n# My Title\nbody text",
@@ -567,7 +705,7 @@ describe("DocumentAgent", () => {
 
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "My Title", author: "Alice" },
+        body: { id: "test-doc", title: "My Title", author: "Alice", listed: true },
       });
     });
 
@@ -577,7 +715,7 @@ describe("DocumentAgent", () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-mist-public": "true",
+            "x-mist-listed": "true",
           },
           body: JSON.stringify({ content: "just some text\nmore text" }),
         }),
@@ -585,31 +723,31 @@ describe("DocumentAgent", () => {
 
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "just some text", author: null },
+        body: { id: "test-doc", title: "just some text", author: null, listed: true },
       });
     });
 
-    it("registers an empty public document under its id", async () => {
+    it("registers an empty listed document under its id", async () => {
       await agent.onRequest(
         new Request("https://do/", {
           method: "POST",
-          headers: { "x-mist-public": "true" },
+          headers: { "x-mist-listed": "true" },
         }),
       );
 
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "test-doc", author: null },
+        body: { id: "test-doc", title: "test-doc", author: null, listed: true },
       });
     });
 
-    it("does not list a document created without the public opt-in", async () => {
+    it("registers an unlisted document with the listed flag off", async () => {
       await agent.onRequest(new Request("https://do/", { method: "POST" }));
 
-      expect(registryCalls.map((c) => c.path)).not.toContain("/upsert");
+      expect(registryCalls.map((c) => c.path)).not.toContain("/remove");
       expect(registryCalls).toContainEqual({
-        path: "/remove",
-        body: { id: "test-doc" },
+        path: "/upsert",
+        body: { id: "test-doc", title: "test-doc", author: null, listed: false },
       });
     });
 
@@ -627,7 +765,7 @@ describe("DocumentAgent", () => {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "x-mist-public": "true",
+              "x-mist-listed": "true",
             },
             body: JSON.stringify({ content: "# Original" }),
           }),
@@ -650,7 +788,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Updated Title", author: null },
+          body: { id: "test-doc", title: "Updated Title", author: null, listed: true },
         });
         cleanup(client);
       } finally {
@@ -664,7 +802,7 @@ describe("DocumentAgent", () => {
         await agent.onRequest(
           new Request("https://do/", {
             method: "POST",
-            headers: { "x-mist-public": "true" },
+            headers: { "x-mist-listed": "true" },
           }),
         );
         registryCalls.length = 0;
@@ -683,7 +821,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Written", author: "Bob" },
+          body: { id: "test-doc", title: "Written", author: "Bob", listed: true },
         });
         cleanup(client);
       } finally {
@@ -691,7 +829,7 @@ describe("DocumentAgent", () => {
       }
     });
 
-    it("lists a document toggled public from a client", async () => {
+    it("lists a document toggled listed from a client", async () => {
       vi.useFakeTimers();
       try {
         await agent.onRequest(
@@ -704,13 +842,14 @@ describe("DocumentAgent", () => {
         registryCalls.length = 0;
 
         const client = connectYjsClient();
-        client.doc.getMap<string>("docState").set("public", "true");
+        client.doc.getMap<string>("docState").set("listed", "true");
 
-        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+        // Visibility flips bypass the debounce — only microtasks elapse
+        await vi.advanceTimersByTimeAsync(0);
 
         expect(registryCalls).toContainEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Secret Draft", author: null },
+          body: { id: "test-doc", title: "Secret Draft", author: null, listed: true },
         });
         cleanup(client);
       } finally {
@@ -718,7 +857,7 @@ describe("DocumentAgent", () => {
       }
     });
 
-    it("withdraws a document toggled back to private", async () => {
+    it("re-registers a document toggled back to private as unlisted", async () => {
       vi.useFakeTimers();
       try {
         await agent.onRequest(
@@ -726,23 +865,91 @@ describe("DocumentAgent", () => {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "x-mist-public": "true",
+              "x-mist-listed": "true",
             },
-            body: JSON.stringify({ content: "# Was Public" }),
+            body: JSON.stringify({ content: "# Was Listed" }),
           }),
         );
         registryCalls.length = 0;
 
         const client = connectYjsClient();
-        client.doc.getMap<string>("docState").set("public", "false");
+        client.doc.getMap<string>("docState").set("listed", "false");
 
-        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+        // Withdrawal is immediate as well — only microtasks elapse
+        await vi.advanceTimersByTimeAsync(0);
 
         expect(registryCalls).toContainEqual({
-          path: "/remove",
-          body: { id: "test-doc" },
+          path: "/upsert",
+          body: {
+            id: "test-doc",
+            title: "Was Listed",
+            author: null,
+            listed: false,
+          },
         });
-        expect(registryCalls.map((c) => c.path)).not.toContain("/upsert");
+        expect(registryCalls.map((c) => c.path)).not.toContain("/remove");
+        cleanup(client);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("migrates the legacy docState key in place on load", async () => {
+      // A document persisted before the rename carries "public" only
+      const legacy = new Y.Doc();
+      legacy.getMap<string>("docState").set("public", "true");
+      legacy.getXmlFragment("default"); // shape parity with real docs
+      const state = Y.encodeStateAsUpdate(legacy);
+      mockSqlStore.set(
+        "state",
+        state.buffer.slice(state.byteOffset, state.byteOffset + state.byteLength),
+      );
+
+      const client = connectYjsClient();
+      const docState = client.doc.getMap<string>("docState");
+      expect(docState.get("listed")).toBe("true");
+      expect(docState.get("public")).toBeUndefined();
+
+      // The migrated state is persisted immediately (in the chunked
+      // format): a second agent instance loading the stored blob sees
+      // only the new key.
+      const reloaded = new Y.Doc();
+      Y.applyUpdate(reloaded, new Uint8Array(mockSqlStore.get("state:0")!));
+      expect(reloaded.getMap<string>("docState").get("public")).toBeUndefined();
+      expect(reloaded.getMap<string>("docState").get("listed")).toBe("true");
+      cleanup(client);
+    });
+
+    it("keeps debouncing content edits after a visibility flip", async () => {
+      vi.useFakeTimers();
+      try {
+        await agent.onRequest(
+          new Request("https://do/", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: "# Draft" }),
+          }),
+        );
+        const client = connectYjsClient();
+        client.doc.getMap<string>("docState").set("listed", "true");
+        await vi.advanceTimersByTimeAsync(0);
+        registryCalls.length = 0;
+
+        const frag = client.doc.getXmlFragment("default");
+        const para = new Y.XmlElement("paragraph");
+        para.insert(0, [new Y.XmlText("# Renamed")]);
+        frag.insert(0, [para]);
+
+        // An ordinary edit must not sync before the debounce elapses
+        expect(registryCalls).toHaveLength(0);
+        await vi.advanceTimersByTimeAsync(REGISTRY_SYNC_DEBOUNCE_MS + 50);
+
+        expect(registryCalls).toEqual([
+          {
+            path: "/upsert",
+            body: { id: "test-doc", title: "Renamed", author: null, listed: true },
+          },
+        ]);
         cleanup(client);
       } finally {
         vi.useRealTimers();

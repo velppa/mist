@@ -3,7 +3,9 @@
 @theme {
   --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+  /* System monos only: webfont subsets lack box-drawing, arrows, and Greek,
+     and per-glyph fallback breaks column alignment in ASCII tables. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono",
     Consolas, "Liberation Mono", "Courier New", monospace;
   --font-serif: "Georgia", "Times New Roman", ui-serif, serif;
   --color-ink: #1a1a1a;
@@ -255,7 +257,6 @@ body {
 /* Preview styles */
 .preview {
   padding: 1.5rem;
-  font-family: var(--font-serif);
   font-size: 1.15rem;
   line-height: 1.7;
   color: var(--color-ink);

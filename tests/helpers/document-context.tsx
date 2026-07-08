@@ -1,4 +1,5 @@
 import { render, type RenderOptions } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import type { ReactElement } from "react";
 import type { DocumentContextValue } from "~/lib/DocumentContext";
 import { vi } from "vitest";
@@ -37,6 +38,7 @@ export function createMockDocumentContext(
   return {
     docId: "test-doc",
     createdAt: Date.now(),
+    userEmail: null,
     yjs: {
       doc: {} as DocumentContextValue["yjs"]["doc"],
       awareness: {} as DocumentContextValue["yjs"]["awareness"],
@@ -55,6 +57,8 @@ export function createMockDocumentContext(
     togglePreview: vi.fn(),
     setPreviewHeld: vi.fn(),
     cleanView: true,
+    docWidth: "120" as const,
+    setDocWidth: vi.fn(),
     toggleCleanView: vi.fn(),
     commentActive: false,
     commentSelection: null,
@@ -83,16 +87,18 @@ export function renderWithDocument(
   ui: ReactElement,
   {
     context: contextOverrides,
+    url,
     ...renderOptions
-  }: RenderOptions & { context?: Partial<DocumentContextValue> } = {},
+  }: RenderOptions & { context?: Partial<DocumentContextValue>; url?: string } = {},
 ) {
   const contextValue = createMockDocumentContext(contextOverrides);
 
   function Wrapper({ children }: { children: React.ReactNode }) {
+    // MemoryRouter satisfies components using router hooks (useNavigate)
     return createElement(
-      _DocumentContext.Provider,
-      { value: contextValue },
-      children,
+      MemoryRouter,
+      url ? { initialEntries: [url] } : null,
+      createElement(_DocumentContext.Provider, { value: contextValue }, children),
     );
   }
 

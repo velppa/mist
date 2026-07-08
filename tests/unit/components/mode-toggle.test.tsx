@@ -6,18 +6,15 @@ import { renderWithDocument } from "../../helpers/document-context";
 import ModeToggle from "~/components/ModeToggle";
 
 describe("ModeToggle", () => {
-  it("shows 'Edit mode' when mode is edit", () => {
-    const { getByText } = renderWithDocument(createElement(ModeToggle), {
-      context: { mode: "edit" },
-    });
-    expect(getByText("Edit mode")).toBeTruthy();
-  });
-
-  it("shows 'Suggest changes' when mode is suggest", () => {
-    const { getByText } = renderWithDocument(createElement(ModeToggle), {
-      context: { mode: "suggest" },
-    });
-    expect(getByText("Suggest changes")).toBeTruthy();
+  it("keeps the 'Suggest changes' label in both modes", () => {
+    for (const mode of ["edit", "suggest"] as const) {
+      const { getByText, unmount } = renderWithDocument(
+        createElement(ModeToggle),
+        { context: { mode } },
+      );
+      expect(getByText("Suggest changes")).toBeTruthy();
+      unmount();
+    }
   });
 
   it("toggle calls toggleMode", () => {

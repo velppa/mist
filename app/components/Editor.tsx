@@ -285,6 +285,15 @@ export default function Editor({
     }
   }, [editor, onEditorReady]);
 
+  // Focus once the doc is synced and the editor is visible, so a freshly
+  // created document can be typed into immediately.
+  const focusedOnceRef = useRef(false);
+  useEffect(() => {
+    if (!editor || hidden || !yjs.synced || focusedOnceRef.current) return;
+    focusedOnceRef.current = true;
+    editor.commands.focus("start");
+  }, [editor, hidden, yjs.synced]);
+
   const handleClick = useCallback(() => {
     if (editor && !editor.isFocused) {
       editor.commands.focus("end");

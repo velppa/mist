@@ -8,7 +8,7 @@ export default function ModeToggle() {
   return (
     <div className="flex items-center justify-between px-4 py-3">
       <span className="text-sm uppercase tracking-wider text-muted">
-        {isSuggest ? "Suggest changes" : "Edit mode"}
+        Suggest changes
       </span>
       <Switch.Root
         checked={isSuggest}

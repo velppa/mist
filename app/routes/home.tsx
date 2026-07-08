@@ -1,5 +1,5 @@
-import { useRef, useState, useCallback } from "react";
-import { Link, useNavigate } from "react-router";
+import { useRef, useCallback } from "react";
+import { useNavigate } from "react-router";
 import { getAgentByName } from "agents";
 import type { Route } from "./+types/home";
 import {
@@ -11,7 +11,10 @@ import type { RegistryEntry } from "~/shared/types";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { deserializeThreads } from "~/lib/thread-serialization";
+import { useLoaderRefresh } from "~/lib/useLoaderRefresh";
 import ThemeSelector from "~/components/ThemeSelector";
+import DocTable from "~/components/DocTable";
+import UserMenu from "~/components/UserMenu";
 import demoDocument from "./demo.md?raw";
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -45,62 +48,39 @@ export function meta(_args: Route.MetaArgs) {
   ];
 }
 
-function formatDate(timestamp: number): string {
-  // Fixed ISO date keeps server and client renders identical
-  return new Date(timestamp).toISOString().slice(0, 10);
-}
-
 function RecentDocuments({ documents }: { documents: RegistryEntry[] }) {
-  if (documents.length === 0) return null;
+  if (documents.length === 0) {
+    return (
+      <p className="mx-auto w-full max-w-5xl px-4 text-muted">
+        No listed documents yet.
+      </p>
+    );
+  }
 
   return (
-    <section className="mx-auto w-full max-w-2xl px-4 pb-16">
+    <section className="mx-auto w-full max-w-5xl px-4">
       <h2 className="mb-2 font-mono font-light uppercase tracking-wider text-muted">
         Recent documents
       </h2>
-      <ul>
-        {documents.map((doc) => (
-          <li
-            key={doc.id}
-            className="flex items-baseline gap-4 border-t border-border py-2"
-          >
-            <Link
-              to={`/docs/${doc.id}`}
-              className="min-w-0 flex-1 truncate text-ink transition-colors hover:text-coral"
-            >
-              {doc.title}
-            </Link>
-            {doc.author && (
-              <span className="shrink-0 truncate text-muted">{doc.author}</span>
-            )}
-            <time
-              dateTime={new Date(doc.updatedAt).toISOString()}
-              className="shrink-0 font-mono text-base text-muted"
-            >
-              {formatDate(doc.updatedAt)}
-            </time>
-          </li>
-        ))}
-      </ul>
+      <DocTable documents={documents} showAuthor />
     </section>
   );
 }
 
 export default function Home({ loaderData }: Route.ComponentProps) {
-  const { origin, documents } = loaderData;
+  const { documents, userEmail } = loaderData;
+  // Newly public documents show up without a manual reload
+  useLoaderRefresh();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [copied, setCopied] = useState(false);
-
-  const curlCommand = `curl ${origin}/new -T file.md`;
-
-  function handleCopy() {
-    navigator.clipboard.writeText(curlCommand);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleNewDocument() {
+    const id = generateDocumentId();
+    await fetch(`/agents/document-agent/${id}`, { method: "POST" });
+    // Creators land in edit mode; shared links open in preview by default
+    navigate(`/docs/${id}?view=edit`);
   }
 
-  async function handleNewDocument() {
+  async function handleDemoDocument() {
     const { body, threads, onboarding } = deserializeThreads(demoDocument);
     const id = generateDocumentId();
     await fetch(`/agents/document-agent/${id}`, {
@@ -108,21 +88,28 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: body, threads, onboarding }),
     });
-    // Creators land in edit mode; shared links open in preview by default
     navigate(`/docs/${id}?view=edit`);
   }
 
   const handleUpload = useCallback(
     async (file: File) => {
       const text = await file.text();
-      const { body, threads } = deserializeThreads(text);
-      const id = generateDocumentId();
+      // File extension decides the note format; frontmatter/threads are
+      // a markdown concept.
+      const ext = file.name.match(/\.(txt|html?)$/i)?.[1]?.toLowerCase();
+      const suffix = ext === "txt" ? ".txt" : ext ? ".html" : "";
+      const id = generateDocumentId() + suffix;
+      const payload = suffix
+        ? { content: text }
+        : (() => {
+            const { body, threads } = deserializeThreads(text);
+            return { content: body, threads };
+          })();
 
-      // Create the document with initial content + threads via POST body
       await fetch(`/agents/document-agent/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: body, threads }),
+        body: JSON.stringify(payload),
       });
 
       navigate(`/docs/${id}?view=edit`);
@@ -142,7 +129,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file && file.name.endsWith(".md")) handleUpload(file);
+      if (file && /\.(md|txt|html?)$/i.test(file.name)) handleUpload(file);
     },
     [handleUpload],
   );
@@ -154,84 +141,59 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   return (
     <>
       <div
-        className={`relative flex flex-col items-center justify-center px-4 ${
-          documents.length > 0 ? "min-h-[70vh]" : "min-h-screen"
-        }`}
+        className="flex min-h-screen flex-col"
         onDrop={handleDrop}
         onDragOver={handleDragOver}
       >
-        <div className="absolute right-3 top-3">
-          <ThemeSelector />
-        </div>
-        <h1 className="mb-1 font-bold">{APP_NAME}</h1>
-        <p className="mb-8 text-muted">
-          Share and edit Markdown together, quickly
-        </p>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <button
-            onClick={handleNewDocument}
-            className="cursor-pointer whitespace-nowrap border border-ink bg-ink px-6 py-2 text-paper transition-opacity hover:opacity-80"
-          >
-            New document
-          </button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="cursor-pointer whitespace-nowrap border border-border px-6 py-2 text-muted transition-colors hover:border-ink hover:text-ink"
-          >
-            Drag and drop .md file
-          </button>
-        </div>
+        <header className="flex items-stretch overflow-x-auto scrollbar-none border-b border-border">
+          <span className="flex items-center bg-ink px-4 py-2 font-medium text-paper">
+            {APP_NAME}
+          </span>
+          <div className="flex grow shrink-0 items-center px-4">
+            <span className="text-muted">
+              Share and edit Markdown together, quickly
+            </span>
+          </div>
+          <div className="flex shrink-0 items-stretch border-l border-border">
+            <button
+              onClick={handleNewDocument}
+              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
+            >
+              New document
+            </button>
+          </div>
+          <div className="flex shrink-0 items-stretch border-l border-border">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
+            >
+              Upload .md
+            </button>
+          </div>
+          <div className="flex shrink-0 items-stretch border-l border-border">
+            <button
+              onClick={handleDemoDocument}
+              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
+            >
+              Demo
+            </button>
+          </div>
+          <UserMenu userEmail={userEmail} />
+          <div className="flex shrink-0 items-center border-l border-border">
+            <ThemeSelector />
+          </div>
+        </header>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".md"
+          accept=".md,.txt,.html,.htm"
           onChange={handleFileChange}
           className="hidden"
         />
-        <p className="mt-8 text-muted">Or from your terminal</p>
-        <div className="mt-2 flex max-w-full items-center gap-1.5">
-          <code className="flex min-w-0 items-center overflow-x-auto font-mono text-base">
-            <span className="md-delimiter shrink-0">`</span>
-            <span className="md-code whitespace-nowrap">{curlCommand}</span>
-            <span className="md-delimiter shrink-0">`</span>
-          </code>
-          <button
-            onClick={handleCopy}
-            className="shrink-0 cursor-pointer p-1 text-muted hover:text-ink transition-colors"
-            aria-label={copied ? "Copied" : "Copy command"}
-          >
-            {copied ? (
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            ) : (
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-            )}
-          </button>
-        </div>
+        <main className="flex-1 overflow-y-auto pb-16 pt-6">
+          <RecentDocuments documents={documents} />
+        </main>
       </div>
-      <RecentDocuments documents={documents} />
       <footer className="fixed bottom-0 left-0 right-0 z-10 flex items-baseline justify-between border-t border-border bg-paper px-4 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-base text-muted">
         <span>
           Bugs and feedback on{" "}

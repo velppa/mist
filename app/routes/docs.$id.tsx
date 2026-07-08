@@ -13,6 +13,7 @@ import ConnectionStatus from "~/components/ConnectionStatus";
 import ShareButton from "~/components/ShareButton";
 import UserMenu from "~/components/UserMenu";
 import ModeToggle from "~/components/ModeToggle";
+import WidthToggle from "~/components/WidthToggle";
 import CleanViewToggle from "~/components/CleanViewToggle";
 import SuggestionActions from "~/components/SuggestionActions";
 import CommentInput from "~/components/CommentInput";
@@ -21,8 +22,10 @@ import ThemeSelector from "~/components/ThemeSelector";
 import MobilePanel from "~/components/MobilePanel";
 import OnboardingBanner from "~/components/OnboardingBanner";
 
-export function meta(_args: Route.MetaArgs) {
-  return [{ title: "mist" }];
+export function meta({ data }: Route.MetaArgs) {
+  // Same fallback as the registry: untitled docs go by their id
+  const title = data?.title ?? data?.id;
+  return [{ title: title ? `${title} | mist` : "mist" }];
 }
 
 export async function loader({ params, context, request }: Route.LoaderArgs) {
@@ -34,10 +37,11 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
   const { env } = getCloudflare(context);
   const stub = await getAgentByName(env.DocumentAgent, id);
   const res = await stub.fetch(new Request("https://do/"));
-  const { exists, createdAt, author } = (await res.json()) as {
+  const { exists, createdAt, author, title } = (await res.json()) as {
     exists: boolean;
     createdAt: number | null;
     author?: string | null;
+    title?: string | null;
   };
 
   if (!exists) {
@@ -47,7 +51,7 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
   // Signed-in identity: used as awareness name and comment author.
   const userEmail = await getSessionEmail(request, env as AuthEnv);
 
-  return { id, createdAt, author: author ?? null, userEmail };
+  return { id, createdAt, author: author ?? null, title: title ?? null, userEmail };
 }
 
 export default function DocumentPage({ loaderData }: Route.ComponentProps) {
@@ -74,6 +78,8 @@ function DocumentLayout({ id }: { id: string }) {
     handleResolveAtCursor,
     handleDeleteAtCursor,
     mode,
+    userEmail,
+    docWidth,
   } = useDocument();
 
   return (
@@ -85,13 +91,19 @@ function DocumentLayout({ id }: { id: string }) {
         >
           mist
         </Link>
-        <div className="flex grow shrink-0 items-center px-4">
+        <div className="flex grow shrink-0 items-center gap-3 px-4">
           <span className="font-mono font-bold">{id}</span>
+          <a
+            href={`/raw/${id}`}
+            className="border border-border px-2.5 py-0.5 text-sm uppercase tracking-wider text-ink transition-colors hover:bg-ink hover:text-paper"
+          >
+            raw
+          </a>
         </div>
         <div className="flex shrink-0 items-center border-l border-border px-3">
           <ConnectionStatus />
         </div>
-        <UserMenu />
+        <UserMenu userEmail={userEmail} />
         <div className="shrink-0 border-l border-border">
           <ShareButton />
         </div>
@@ -101,23 +113,32 @@ function DocumentLayout({ id }: { id: string }) {
       </header>
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-y-auto pb-[33vh] lg:border-r lg:border-border lg:pb-0">
-          <Editor
-            yjs={yjs}
-            hidden={showPreview}
-            onEditorReady={handleEditorReady}
-            onCommentClick={handleCommentClick}
-            commentHighlight={commentHighlight}
-            activeCommentRange={activeCommentRange}
-            cleanView={cleanView}
-            onNewComment={openCommentInput}
-            onResolveAtCursor={handleResolveAtCursor}
-            onDeleteAtCursor={handleDeleteAtCursor}
-          />
-          {showPreview && <Preview />}
+          <div
+            className={
+              docWidth === "full"
+                ? undefined
+                : `mx-auto ${docWidth === "120" ? "max-w-[120ch]" : "max-w-[65ch]"}`
+            }
+          >
+            <Editor
+              yjs={yjs}
+              hidden={showPreview}
+              onEditorReady={handleEditorReady}
+              onCommentClick={handleCommentClick}
+              commentHighlight={commentHighlight}
+              activeCommentRange={activeCommentRange}
+              cleanView={cleanView}
+              onNewComment={openCommentInput}
+              onResolveAtCursor={handleResolveAtCursor}
+              onDeleteAtCursor={handleDeleteAtCursor}
+            />
+            {showPreview && <Preview />}
+          </div>
         </main>
         <aside className="hidden w-96 flex-col overflow-hidden lg:flex">
           <div className="flex-1 overflow-y-auto">
             <OnboardingBanner />
+            <WidthToggle />
             <ModeToggle />
             <SuggestionActions />
             {mode === "suggest" && <CleanViewToggle />}
