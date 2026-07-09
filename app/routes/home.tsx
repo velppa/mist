@@ -4,6 +4,7 @@ import { getAgentByName } from "agents";
 import type { Route } from "./+types/home";
 import {
   APP_NAME,
+  APP_VERSION,
   generateDocumentId,
   REGISTRY_AGENT_NAME,
 } from "~/shared/constants";
@@ -97,27 +98,28 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       // File extension decides the note format; frontmatter/threads are
       // a markdown concept.
       const ext = file.name.match(/\.(txt|html?|jsx|ipynb)$/i)?.[1]?.toLowerCase();
-      const suffix =
+      const format =
         ext === "txt"
-          ? ".txt"
+          ? "txt"
           : ext === "jsx"
-            ? ".jsx"
+            ? "jsx"
             : ext === "ipynb"
-              ? ".ipynb"
+              ? "ipynb"
               : ext
-                ? ".html"
-                : "";
-      const id = generateDocumentId() + suffix;
-      const payload = suffix
-        ? { content: text }
-        : (() => {
-            const { body, threads } = deserializeThreads(text);
-            return { content: body, threads };
-          })();
+                ? "html"
+                : "md";
+      const id = generateDocumentId();
+      const payload =
+        format === "md"
+          ? (() => {
+              const { body, threads } = deserializeThreads(text);
+              return { content: body, threads };
+            })()
+          : { content: text };
 
       await fetch(`/agents/document-agent/${id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-mist-format": format },
         body: JSON.stringify(payload),
       });
 
@@ -216,8 +218,16 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </a>
           .
         </span>
-        <span className="font-mono font-light uppercase tracking-wider text-ink">
-          MIT licensed
+        <span className="flex items-baseline gap-4">
+          <a
+            href="/docs/mist-changelog-2impzerh.md"
+            className="font-mono font-light uppercase tracking-wider text-muted transition-colors hover:text-coral"
+          >
+            v{APP_VERSION}
+          </a>
+          <span className="font-mono font-light uppercase tracking-wider text-ink">
+            MIT licensed
+          </span>
         </span>
       </footer>
     </>

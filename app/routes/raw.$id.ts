@@ -1,78 +1,20 @@
 import { data } from "react-router";
 import { getAgentByName } from "agents";
-import { marked } from "marked";
-import { splitFrontmatter } from "~/lib/doc-meta";
 import type { Route } from "./+types/raw.$id";
-import { parseDocId, docFormat } from "~/shared/constants";
+import { parseDocId, effectiveFormat } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
-import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
-import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 
-const SOURCE_CONTENT_TYPES = {
+const RAW_CONTENT_TYPES = {
   md: "text/markdown; charset=utf-8",
   txt: "text/plain; charset=utf-8",
+  // No standard renderable mime for JSX; text/plain displays in-browser
   jsx: "text/plain; charset=utf-8",
-  ipynb: "text/plain; charset=utf-8",
-  // Source view must display the markup, not render it
-  html: "text/plain; charset=utf-8",
+  ipynb: "application/json; charset=utf-8",
+  html: "text/html; charset=utf-8",
 } as const;
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/** Minimal self-contained shell for server-rendered markdown. */
-function markdownPage(title: string, text: string): string {
-  // Frontmatter is metadata, not prose — shown as a muted block
-  // instead of letting marked mangle it into setext headings.
-  const { frontmatter, body: mdBody } = splitFrontmatter(text);
-  const fmHtml = frontmatter
-    ? `<pre class="frontmatter">${escapeHtml(frontmatter)}</pre>`
-    : "";
-  const body = fmHtml + (marked.parse(mdBody, { async: false }) as string);
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>
-  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 72ch;
-         margin: 2rem auto; padding: 0 1rem; line-height: 1.7;
-         background: #fafaf8; color: #1a1a1a; }
-  h1, h2, h3, h4 { line-height: 1.3; }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  code { background: #ececea; padding: .1em .3em; border-radius: 2px; font-size: .9em; }
-  pre { background: #ececea; padding: 1em; overflow-x: auto; }
-  pre code { background: none; padding: 0; }
-  pre.frontmatter { background: none; border: 1px solid #ddd; color: #777;
-                    font-size: .85em; padding: .6em 1em; }
-  blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 1em; color: #555; }
-  a { color: inherit; }
-  img { max-width: 100%; }
-  @media (prefers-color-scheme: dark) {
-    body { background: #161615; color: #e8e8e6; }
-    code, pre { background: #2a2a28; }
-    blockquote { border-color: #444; color: #aaa; }
-  }
-</style>
-</head>
-<body>
-${body}
-</body>
-</html>`;
-}
-
-/**
- * Serve the document. Default: the rendered page (html verbatim, jsx
- * via the shared runner, markdown server-rendered, txt as-is). With
- * ?source=true: the verbatim source for every format.
- */
-export async function loader({ params, context, request }: Route.LoaderArgs) {
+/** Serve the verbatim document source with its format's content type. */
+export async function loader({ params, context }: Route.LoaderArgs) {
   const id = parseDocId(params.id);
   if (!id) {
     throw data(null, { status: 404 });
@@ -81,43 +23,26 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
   const { env } = getCloudflare(context);
   const stub = await getAgentByName(env.DocumentAgent, id);
   const res = await stub.fetch(new Request("https://do/?include=text"));
-  const { exists, text, title } = (await res.json()) as {
+  const { exists, text, format: storedFormat } = (await res.json()) as {
     exists: boolean;
     text?: string;
-    title?: string | null;
+    format?: string;
   };
 
   if (!exists) {
     throw data(null, { status: 404 });
   }
 
-  const format = docFormat(id);
-  const source = new URL(request.url).searchParams.get("source") === "true";
-  const headers = new Headers({ "X-Content-Type-Options": "nosniff" });
-
-  if (source || format === "txt") {
-    headers.set(
-      "Content-Type",
-      source ? SOURCE_CONTENT_TYPES[format] : SOURCE_CONTENT_TYPES.txt,
-    );
-    return new Response(text ?? "", { headers });
+  const format = effectiveFormat(storedFormat);
+  const headers = new Headers({
+    "X-Content-Type-Options": "nosniff",
+    "Content-Type": RAW_CONTENT_TYPES[format],
+  });
+  if (format === "html") {
+    // Raw html renders as html; the sandbox keeps the note's scripts in
+    // an opaque origin, away from the viewer's mist session.
+    headers.set("Content-Security-Policy", "sandbox allow-scripts");
   }
 
-  // Rendered pages carry user-authored markup/scripts: serve them in an
-  // opaque origin so nothing can reach mist with the viewer's cookies.
-  // For markdown this sandbox is also the XSS containment — DOMPurify
-  // needs a DOM and cannot run in the worker.
-  headers.set("Content-Type", "text/html; charset=utf-8");
-  headers.set("Content-Security-Policy", "sandbox allow-scripts");
-
-  const body =
-    format === "html"
-      ? (text ?? "")
-      : format === "jsx"
-        ? buildJsxRunnerHtml(text ?? "")
-        : format === "ipynb"
-          ? buildIpynbRunnerHtml(text ?? "")
-          : markdownPage(title ?? id, text ?? "");
-
-  return new Response(body, { headers });
+  return new Response(text ?? "", { headers });
 }

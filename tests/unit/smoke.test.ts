@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   APP_NAME,
   isValidDocumentId,
-  docFormat,
+  effectiveFormat,
 } from "~/shared/constants";
 
 describe("scaffolding", () => {
@@ -26,19 +26,18 @@ describe("isValidDocumentId", () => {
 });
 
 describe("document formats", () => {
-  it("accepts txt, html and jsx id suffixes", () => {
-    expect(isValidDocumentId("abcd1234.txt")).toBe(true);
-    expect(isValidDocumentId("abcd1234.html")).toBe(true);
-    expect(isValidDocumentId("abcd1234.jsx")).toBe(true);
-    expect(isValidDocumentId("abcd1234.pdf")).toBe(false);
+  it("ids are bare — extensions are not part of the id", () => {
+    expect(isValidDocumentId("abcd1234.txt")).toBe(false);
+    expect(isValidDocumentId("abcd1234.md")).toBe(false);
     expect(isValidDocumentId(".txt")).toBe(false);
-    expect(isValidDocumentId("abcd12345.txt")).toBe(false);
+    expect(isValidDocumentId("abcd12345")).toBe(false);
   });
 
-  it("derives the format from the id suffix", () => {
-    expect(docFormat("abcd1234")).toBe("md");
-    expect(docFormat("abcd1234.txt")).toBe("txt");
-    expect(docFormat("abcd1234.html")).toBe("html");
-    expect(docFormat("abcd1234.jsx")).toBe("jsx");
+  it("effective format comes from stored state, defaulting to md", () => {
+    expect(effectiveFormat("txt")).toBe("txt");
+    expect(effectiveFormat("ipynb")).toBe("ipynb");
+    expect(effectiveFormat(undefined)).toBe("md");
+    expect(effectiveFormat(null)).toBe("md");
+    expect(effectiveFormat("weird")).toBe("md");
   });
 });

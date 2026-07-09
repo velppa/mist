@@ -3,9 +3,9 @@ import { useAgent } from "agents/react";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { YjsProvider } from "./yjs-provider";
-import { USER_COLOURS } from "~/shared/constants";
+import { USER_COLOURS, effectiveFormat, type DocFormat } from "~/shared/constants";
 import type { UserInfo, DocMode } from "~/shared/types";
-import { LISTED_KEY, readListedFlag } from "~/shared/doc-state";
+import { FORMAT_KEY, LISTED_KEY, readListedFlag } from "~/shared/doc-state";
 
 function randomUserInfo(name?: string | null): UserInfo {
   const idx = Math.floor(Math.random() * USER_COLOURS.length);
@@ -19,7 +19,11 @@ function randomUserInfo(name?: string | null): UserInfo {
   };
 }
 
-export function useYjsEditor(docId: string, userName?: string | null) {
+export function useYjsEditor(
+  docId: string,
+  userName?: string | null,
+  initialFormat?: DocFormat,
+) {
   const doc = useMemo(() => new Y.Doc(), []);
   const awareness = useMemo(() => new Awareness(doc), [doc]);
   const user = useMemo(() => randomUserInfo(userName), [userName]);
@@ -29,6 +33,8 @@ export function useYjsEditor(docId: string, userName?: string | null) {
   const [mode, setModeState] = useState<DocMode>("edit");
   const [isOnboarding, setIsOnboarding] = useState(false);
   const [isListed, setIsListedState] = useState(false);
+  // Server-known format until the doc syncs, then the live value
+  const [format, setFormatState] = useState<DocFormat>(initialFormat ?? "md");
 
   const socket = useAgent({
     agent: "document-agent",
@@ -44,6 +50,9 @@ export function useYjsEditor(docId: string, userName?: string | null) {
       }
       setIsOnboarding(docState.get("onboarding") === "true");
       setIsListedState(readListedFlag(docState));
+      if (docState.has(FORMAT_KEY)) {
+        setFormatState(effectiveFormat(docState.get(FORMAT_KEY)));
+      }
     };
     docState.observe(observer);
     // Read initial value
@@ -67,6 +76,13 @@ export function useYjsEditor(docId: string, userName?: string | null) {
     [docState],
   );
 
+  const setFormat = useCallback(
+    (value: DocFormat) => {
+      docState.set(FORMAT_KEY, value);
+    },
+    [docState],
+  );
+
   // Bridge socket to Yjs
   useEffect(() => {
     if (!socket) return;
@@ -82,5 +98,5 @@ export function useYjsEditor(docId: string, userName?: string | null) {
     };
   }, [socket, doc, awareness]);
 
-  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, setListed };
+  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, setListed, format, setFormat };
 }

@@ -1,33 +1,39 @@
 export const APP_NAME = "mist";
+// Bumped on request; the footer links this to the changelog document
+export const APP_VERSION = "1.0.0";
 
-/** Document formats, encoded as an id suffix; markdown has none. */
+/** Document formats. Stored in the shared docState map, not the id. */
 export type DocFormat = "md" | "txt" | "html" | "jsx" | "ipynb";
 
-/** Format of a document, derived from its id suffix. */
-export function docFormat(id: string): DocFormat {
-  if (id.endsWith(".txt")) return "txt";
-  if (id.endsWith(".html")) return "html";
-  if (id.endsWith(".jsx")) return "jsx";
-  if (id.endsWith(".ipynb")) return "ipynb";
-  return "md";
+export const DOC_FORMATS: DocFormat[] = ["md", "txt", "html", "jsx", "ipynb"];
+
+/**
+ * The format a document effectively has: the stored docState value when
+ * it is a known format, markdown otherwise.
+ */
+export function effectiveFormat(stored?: string | null): DocFormat {
+  return (DOC_FORMATS as string[]).includes(stored ?? "")
+    ? (stored as DocFormat)
+    : "md";
 }
 
+/** Bare 8-char document id (no alias, no extension). */
 export function isValidDocumentId(id: string): boolean {
-  const base = id.replace(/\.(txt|html|jsx|ipynb)$/, "");
-  if (base.length !== 8) return false;
-  return /^[a-z0-9]+$/.test(base);
+  return /^[a-z0-9]{8}$/.test(id);
 }
 
 /**
  * Canonical id of a /docs or /raw path parameter. The parameter may
- * carry a decorative title alias ("sapi-override-generator-4q5dalwz.html");
- * the trailing 8-char segment is authoritative. Returns null when no
- * valid id can be extracted.
+ * carry a decorative title alias and a decorative format extension
+ * ("sapi-override-generator-4q5dalwz.html"); the trailing 8-char
+ * segment is authoritative. Returns null when no valid id can be
+ * extracted.
  */
 export function parseDocId(param: string): string | null {
-  if (isValidDocumentId(param)) return param;
-  const match = param.match(/-([a-z0-9]{8}(?:\.(?:txt|html|jsx|ipynb))?)$/);
-  if (match && isValidDocumentId(match[1])) return match[1];
+  const base = param.replace(/\.(md|txt|html|jsx|ipynb)$/, "");
+  if (isValidDocumentId(base)) return base;
+  const match = base.match(/-([a-z0-9]{8})$/);
+  if (match) return match[1];
   return null;
 }
 
@@ -46,23 +52,34 @@ export function docSlug(title: string): string {
 
 /**
  * Path to a document, with a title-derived alias when the title
- * yields one ("/docs/<slug>-<id>", else "/docs/<id>").
+ * yields one and an explicit format extension for every format:
+ * "/docs/<slug>-<id>.<format>".
  */
-export function docAliasPath(id: string, title?: string | null): string {
-  return `/docs/${docAliasId(id, title)}`;
+export function docAliasPath(
+  id: string,
+  title?: string | null,
+  format?: DocFormat,
+): string {
+  return `/docs/${docAliasId(id, title, format)}`;
 }
 
 /**
- * Id decorated with the title-derived alias ("<slug>-<id>"), or the
- * plain id when the title yields no useful slug.
+ * Id decorated with the title-derived alias and the format extension
+ * ("<slug>-<id>.<format>"). The alias and extension are decorative;
+ * only the 8-char id resolves the document.
  */
-export function docAliasId(id: string, title?: string | null): string {
+export function docAliasId(
+  id: string,
+  title?: string | null,
+  format?: DocFormat,
+): string {
   const slug = title ? docSlug(title) : "";
+  const ext = format ? `.${format}` : "";
   // A slug that is just the id (or empty) adds nothing
-  if (!slug || slug === id.replace(/\.(txt|html|jsx|ipynb)$/, "")) {
-    return id;
+  if (!slug || slug === id) {
+    return `${id}${ext}`;
   }
-  return `${slug}-${id}`;
+  return `${slug}-${id}${ext}`;
 }
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -108,3 +125,4 @@ export const MSG_AWARENESS = 1;
 
 /** Name of the singleton TokenStore Durable Object instance */
 export const TOKEN_STORE_AGENT_NAME = "tokens";
+export const ASSET_STORE_AGENT_NAME = "assets";

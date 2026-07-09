@@ -74,6 +74,16 @@ describe("POST /new (action)", () => {
     );
   });
 
+  it("forwards the chosen format to the document", async () => {
+    const request = new Request("https://mist.example.com/new?format=txt", {
+      method: "POST",
+      body: "plain",
+    });
+    await action({ request, context } as Parameters<typeof action>[0]);
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(agentRequest.headers.get("x-mist-format")).toBe("txt");
+  });
+
   it("returns 201 with document URL for valid markdown", async () => {
     const request = postRequest("# Hello world\n\nSome content.");
     const response = await action({ request, context } as Parameters<typeof action>[0]);
@@ -82,7 +92,7 @@ describe("POST /new (action)", () => {
     expect(response.headers.get("Content-Type")).toBe("text/plain");
 
     const text = await response.text();
-    expect(text).toBe("https://mist.example.com/docs/abcd1234\n");
+    expect(text).toBe("https://mist.example.com/docs/abcd1234.md\n");
   });
 
   it("returns 201 for empty body (blank document)", async () => {
@@ -488,7 +498,7 @@ describe("POST /new formats", () => {
     } as Parameters<typeof action>[0]);
 
     expect(response.status).toBe(201);
-    expect(await response.text()).toContain("/docs/abcd1234\n");
+    expect(await response.text()).toContain("/docs/abcd1234.md\n");
   });
 
   it("?format=ipynb appends the .ipynb suffix and stores body verbatim", async () => {
@@ -523,7 +533,7 @@ describe("POST /new formats", () => {
     } as Parameters<typeof action>[0]);
 
     expect(response.status).toBe(201);
-    expect(await response.text()).toContain("/docs/abcd1234\n");
+    expect(await response.text()).toContain("/docs/abcd1234.md\n");
   });
 
   it("sniffs html from a doctype body without a format param", async () => {
@@ -543,7 +553,7 @@ describe("POST /new formats", () => {
     } as Parameters<typeof action>[0]);
 
     expect(response.status).toBe(201);
-    expect(await response.text()).toContain("/docs/abcd1234\n");
+    expect(await response.text()).toContain("/docs/abcd1234.md\n");
   });
 
   it("defaults to markdown", async () => {
@@ -553,7 +563,7 @@ describe("POST /new formats", () => {
     } as Parameters<typeof action>[0]);
 
     expect(response.status).toBe(201);
-    expect(await response.text()).toContain("/docs/abcd1234\n");
+    expect(await response.text()).toContain("/docs/abcd1234.md\n");
   });
 
   it("rejects an unknown format value", async () => {

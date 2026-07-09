@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { data, Link } from "react-router";
 import type { Route } from "./+types/docs.$id";
 import { getAgentByName } from "agents";
-import { docAliasId, docFormat, parseDocId } from "~/shared/constants";
+import { docAliasId, effectiveFormat, parseDocId } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { useYjsEditor } from "~/lib/useYjsEditor";
@@ -15,6 +15,7 @@ import ShareButton from "~/components/ShareButton";
 import UserMenu from "~/components/UserMenu";
 import ModeToggle from "~/components/ModeToggle";
 import WidthToggle from "~/components/WidthToggle";
+import FormatToggle from "~/components/FormatToggle";
 import CleanViewToggle from "~/components/CleanViewToggle";
 import SuggestionActions from "~/components/SuggestionActions";
 import CommentInput from "~/components/CommentInput";
@@ -40,11 +41,12 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
   const { env } = getCloudflare(context);
   const stub = await getAgentByName(env.DocumentAgent, id);
   const res = await stub.fetch(new Request("https://do/"));
-  const { exists, createdAt, author, title } = (await res.json()) as {
+  const { exists, createdAt, author, title, format } = (await res.json()) as {
     exists: boolean;
     createdAt: number | null;
     author?: string | null;
     title?: string | null;
+    format?: string;
   };
 
   if (!exists) {
@@ -54,17 +56,24 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
   // Signed-in identity: used as awareness name and comment author.
   const userEmail = await getSessionEmail(request, env as AuthEnv);
 
-  return { id, createdAt, author: author ?? null, title: title ?? null, userEmail };
+  return {
+    id,
+    createdAt,
+    author: author ?? null,
+    title: title ?? null,
+    format: effectiveFormat(format),
+    userEmail,
+  };
 }
 
 export default function DocumentPage({ loaderData }: Route.ComponentProps) {
-  const { id, createdAt, title, userEmail } = loaderData;
-  const yjs = useYjsEditor(id, userEmail);
+  const { id, createdAt, title, format, userEmail } = loaderData;
+  const yjs = useYjsEditor(id, userEmail, format);
 
   return (
     <DocumentProvider
       docId={id}
-      aliasId={docAliasId(id, title)}
+      aliasBase={docAliasId(id, title)}
       createdAt={createdAt}
       userEmail={userEmail}
       yjs={yjs}
@@ -90,11 +99,11 @@ function DocumentLayout() {
     userEmail,
     docWidth,
     aliasId,
-    docId,
+    format,
   } = useDocument();
   // Non-markdown notes are source text; edit them in the same
   // monospace face the preview and raw views use.
-  const monoDoc = docFormat(docId) !== "md";
+  const monoDoc = format !== "md";
   const [copiedUrl, setCopiedUrl] = useState(false);
 
   const handleCopyUrl = useCallback(async () => {
@@ -116,6 +125,12 @@ function DocumentLayout() {
         </Link>
         <div className="flex grow shrink-0 items-center gap-3 px-4">
           <span className="font-mono font-bold">{aliasId}</span>
+          <a
+            href={`/render/${aliasId}`}
+            className="border border-border px-2.5 py-0.5 text-sm uppercase tracking-wider text-ink transition-colors hover:bg-ink hover:text-paper"
+          >
+            render
+          </a>
           <a
             href={`/raw/${aliasId}`}
             className="border border-border px-2.5 py-0.5 text-sm uppercase tracking-wider text-ink transition-colors hover:bg-ink hover:text-paper"
@@ -168,6 +183,7 @@ function DocumentLayout() {
           <div className="flex-1 overflow-y-auto">
             <OnboardingBanner />
             <WidthToggle />
+            <FormatToggle />
             <ModeToggle />
             <SuggestionActions />
             {mode === "suggest" && <CleanViewToggle />}

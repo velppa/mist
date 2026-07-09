@@ -14,6 +14,7 @@ interface UpsertPayload {
   title?: unknown;
   author?: unknown;
   listed?: unknown;
+  format?: unknown;
 }
 
 /**
@@ -35,6 +36,7 @@ interface Row {
   title: string;
   author: string | null;
   listed: number;
+  format: string;
   created_at: number;
   updated_at: number;
 }
@@ -45,6 +47,7 @@ function toEntry(row: Row): RegistryEntry {
     title: row.title,
     author: row.author,
     listed: row.listed === 1,
+    format: row.format,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -65,6 +68,7 @@ class DocumentRegistry extends Agent {
         title TEXT NOT NULL,
         author TEXT,
         listed INTEGER NOT NULL DEFAULT 0,
+        format TEXT NOT NULL DEFAULT 'md',
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
@@ -94,6 +98,11 @@ class DocumentRegistry extends Agent {
       // v2: the concept was renamed public -> listed.
       this.sql`ALTER TABLE documents RENAME COLUMN public TO listed`;
     }
+
+    if (!cols.includes("format")) {
+      // v3: format became registry metadata (defaulting to markdown).
+      this.sql`ALTER TABLE documents ADD COLUMN format TEXT NOT NULL DEFAULT 'md'`;
+    }
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -122,17 +131,20 @@ class DocumentRegistry extends Agent {
           ? payload.author.trim()
           : null;
       const listed = payload.listed === true ? 1 : 0;
+      const format =
+        typeof payload.format === "string" && payload.format ? payload.format : "md";
       const now = Date.now();
 
       // Keep created_at from the first upsert; keep a previously known
       // author if the new payload doesn't carry one.
       this.sql`
-        INSERT INTO documents (id, title, author, listed, created_at, updated_at)
-        VALUES (${id}, ${title}, ${author}, ${listed}, ${now}, ${now})
+        INSERT INTO documents (id, title, author, listed, format, created_at, updated_at)
+        VALUES (${id}, ${title}, ${author}, ${listed}, ${format}, ${now}, ${now})
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           author = COALESCE(excluded.author, documents.author),
           listed = excluded.listed,
+          format = excluded.format,
           updated_at = excluded.updated_at
       `;
 
@@ -170,7 +182,7 @@ class DocumentRegistry extends Agent {
       }
 
       const rows = this.sql<Row>`
-        SELECT id, title, author, listed, created_at, updated_at
+        SELECT id, title, author, listed, format, created_at, updated_at
         FROM documents
         WHERE author = ${payload.email}
         ORDER BY updated_at DESC
@@ -181,7 +193,7 @@ class DocumentRegistry extends Agent {
 
     if (request.method === "GET") {
       const rows = this.sql<Row>`
-        SELECT id, title, author, listed, created_at, updated_at
+        SELECT id, title, author, listed, format, created_at, updated_at
         FROM documents
         WHERE listed = 1
         ORDER BY updated_at DESC

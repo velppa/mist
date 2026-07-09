@@ -57,11 +57,12 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (format === null) {
       return textError("unknown format (use md, txt, html, jsx or ipynb)", 400);
     }
-    const id =
-      generateDocumentId() + (format === "md" ? "" : `.${format}`);
+    const id = generateDocumentId();
     const stub = await getAgentByName(env.DocumentAgent, id);
 
     const headers = new Headers();
+    // Format is document state, seeded at creation; the id stays bare.
+    headers.set("x-mist-format", format);
     // Frontmatter (author/listed/threads) is a markdown concept; txt and
     // html bodies are stored verbatim. Frontmatter is stripped before the
     // content reaches the document, so claims are forwarded as headers;
@@ -99,7 +100,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     }
 
     const url = new URL(request.url);
-    return new Response(`${url.origin}/docs/${id}\n`, {
+    // The extension in the URL is decorative; only the id resolves.
+    return new Response(`${url.origin}/docs/${id}.${format}\n`, {
       status: 201,
       headers: { "Content-Type": "text/plain" },
     });

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { RegistryEntry } from "~/shared/types";
-import { docFormat, docAliasPath } from "~/shared/constants";
+import { effectiveFormat, docAliasPath } from "~/shared/constants";
 
 type SortKey = "title" | "format" | "author" | "listed" | "updatedAt";
 type SortDir = "asc" | "desc";
@@ -16,7 +16,7 @@ function compare(a: RegistryEntry, b: RegistryEntry, key: SortKey): number {
     case "title":
       return a.title.localeCompare(b.title);
     case "format":
-      return docFormat(a.id).localeCompare(docFormat(b.id));
+      return effectiveFormat(a.format).localeCompare(effectiveFormat(b.format));
     case "author":
       return (a.author ?? "").localeCompare(b.author ?? "");
     case "listed":
@@ -117,14 +117,14 @@ export default function DocTable({
           <tr key={doc.id} className="border-t border-border">
             <td className="w-full py-2 pr-4">
               <Link
-                to={docAliasPath(doc.id, doc.title)}
+                to={docAliasPath(doc.id, doc.title, effectiveFormat(doc.format))}
                 className="block text-ink transition-colors hover:text-coral"
               >
                 {doc.title}
               </Link>
             </td>
             <td className="whitespace-nowrap py-2 pr-8 font-mono text-sm uppercase tracking-wider text-muted">
-              {docFormat(doc.id)}
+              {effectiveFormat(doc.format)}
             </td>
             {showAuthor && (
               <td className="whitespace-nowrap py-2 pr-4 text-muted">

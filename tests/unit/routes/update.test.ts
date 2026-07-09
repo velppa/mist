@@ -94,25 +94,15 @@ describe("PUT /docs/:id (action)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("strips markdown frontmatter threads like creation does", async () => {
+  it("passes the body through raw — the document interprets it by format", async () => {
     const md = "---\nmist:\n  threads: []\n---\n\n# Doc\n";
     const res = (await call(putRequest("abcd1234", md), "abcd1234")) as Response;
     expect(res.status).toBe(200);
     const body = (await (mockAgentFetch.mock.calls[0][0] as Request).json()) as {
       content: string;
-    };
-    expect(body.content).toBe("# Doc\n");
-  });
-
-  it("sends non-markdown formats verbatim", async () => {
-    const html = "<!doctype html><title>t</title>";
-    const res = (await call(putRequest("abcd1234.html", html), "abcd1234.html")) as Response;
-    expect(res.status).toBe(200);
-    const body = (await (mockAgentFetch.mock.calls[0][0] as Request).json()) as {
-      content: string;
       threads?: unknown;
     };
-    expect(body.content).toBe(html);
+    expect(body.content).toBe(md);
     expect(body.threads).toBeUndefined();
   });
 

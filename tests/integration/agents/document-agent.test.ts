@@ -300,6 +300,113 @@ describe("DocumentAgent", () => {
     });
   });
 
+  describe("document format", () => {
+    beforeEach(() => {
+      mockAgentEnv = { DocumentRegistry: {} };
+    });
+
+    it("seeds docState.format from the x-mist-format header", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-mist-format": "txt" },
+          body: JSON.stringify({ content: "plain text" }),
+        }),
+      );
+      const body = (await agent
+        .onRequest(new Request("https://do/"))
+        .then((r) => r.json())) as { format?: string };
+      expect(body.format).toBe("txt");
+      expect(registryCalls).toContainEqual(
+        expect.objectContaining({
+          path: "/upsert",
+          body: expect.objectContaining({ format: "txt" }),
+        }),
+      );
+    });
+
+    it("md stays the default with no header", async () => {
+      await agent.onRequest(
+        new Request("https://do/", { method: "POST" }),
+      );
+      const body = (await agent
+        .onRequest(new Request("https://do/"))
+        .then((r) => r.json())) as { format?: string };
+      expect(body.format).toBe("md");
+    });
+
+    it("a client format switch re-registers immediately with the new format", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "# Doc" }),
+        }),
+      );
+      registryCalls.length = 0;
+
+      const client = connectYjsClient();
+      client.doc.getMap<string>("docState").set("format", "txt");
+      await Promise.resolve();
+      await vi.waitFor(() => {
+        expect(registryCalls).toContainEqual(
+          expect.objectContaining({
+            path: "/upsert",
+            body: expect.objectContaining({ format: "txt" }),
+          }),
+        );
+      });
+      cleanup(client);
+    });
+
+    it("PUT applies content per the switched format (verbatim, frontmatter kept)", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-mist-format": "txt" },
+          body: JSON.stringify({ content: "old" }),
+        }),
+      );
+      const md = "---\nauthor: x\n---\n# kept verbatim";
+      const res = await agent.onRequest(
+        new Request("https://do/", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: md }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await agent
+        .onRequest(new Request("https://do/?include=text"))
+        .then((r) => r.json())) as { text?: string };
+      expect(body.text).toContain("---");
+      expect(body.text).toContain("author: x");
+    });
+
+    it("PUT strips markdown frontmatter for md documents", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "old" }),
+        }),
+      );
+      const md = "---\nmist:\n  threads: []\n---\n\n# Doc";
+      const res = await agent.onRequest(
+        new Request("https://do/", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: md }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      const body = (await agent
+        .onRequest(new Request("https://do/?include=text"))
+        .then((r) => r.json())) as { text?: string };
+      expect(body.text?.trim()).toBe("# Doc");
+    });
+  });
+
   describe("state chunking", () => {
     it("persists content larger than one chunk row and reloads it", async () => {
       // ~3 MB of text spans multiple 1.5 MB state chunks
@@ -330,7 +437,7 @@ describe("DocumentAgent", () => {
     it("returns exists: false for a fresh agent", async () => {
       const res = await agent.onRequest(new Request("https://do/"));
       const body = await res.json();
-      expect(body).toEqual({ exists: false, createdAt: null, author: null, title: null });
+      expect(body).toEqual({ exists: false, createdAt: null, author: null, title: null, format: "md" });
     });
 
     it("returns exists: true with createdAt after POST", async () => {
@@ -886,7 +993,7 @@ describe("DocumentAgent", () => {
 
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "My Title", author: "Alice", listed: true },
+        body: { id: "test-doc", title: "My Title", author: "Alice", listed: true, format: "md" },
       });
     });
 
@@ -904,7 +1011,7 @@ describe("DocumentAgent", () => {
 
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "just some text", author: null, listed: true },
+        body: { id: "test-doc", title: "just some text", author: null, listed: true, format: "md" },
       });
     });
 
@@ -918,7 +1025,7 @@ describe("DocumentAgent", () => {
 
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "test-doc", author: null, listed: true },
+        body: { id: "test-doc", title: "test-doc", author: null, listed: true, format: "md" },
       });
     });
 
@@ -928,7 +1035,7 @@ describe("DocumentAgent", () => {
       expect(registryCalls.map((c) => c.path)).not.toContain("/remove");
       expect(registryCalls).toContainEqual({
         path: "/upsert",
-        body: { id: "test-doc", title: "test-doc", author: null, listed: false },
+        body: { id: "test-doc", title: "test-doc", author: null, listed: false, format: "md" },
       });
     });
 
@@ -969,7 +1076,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Updated Title", author: null, listed: true },
+          body: { id: "test-doc", title: "Updated Title", author: null, listed: true, format: "md" },
         });
         cleanup(client);
       } finally {
@@ -1002,7 +1109,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Written", author: "Bob", listed: true },
+          body: { id: "test-doc", title: "Written", author: "Bob", listed: true, format: "md" },
         });
         cleanup(client);
       } finally {
@@ -1030,7 +1137,7 @@ describe("DocumentAgent", () => {
 
         expect(registryCalls).toContainEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Secret Draft", author: null, listed: true },
+          body: { id: "test-doc", title: "Secret Draft", author: null, listed: true, format: "md" },
         });
         cleanup(client);
       } finally {
@@ -1066,6 +1173,7 @@ describe("DocumentAgent", () => {
             title: "Was Listed",
             author: null,
             listed: false,
+            format: "md",
           },
         });
         expect(registryCalls.map((c) => c.path)).not.toContain("/remove");
@@ -1128,7 +1236,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toEqual([
           {
             path: "/upsert",
-            body: { id: "test-doc", title: "Renamed", author: null, listed: true },
+            body: { id: "test-doc", title: "Renamed", author: null, listed: true, format: "md" },
           },
         ]);
         cleanup(client);

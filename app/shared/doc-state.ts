@@ -1,6 +1,9 @@
 /** Key in the shared Yjs docState map carrying the listing opt-in. */
 export const LISTED_KEY = "listed";
 
+/** Key in the shared Yjs docState map carrying the document format. */
+export const FORMAT_KEY = "format";
+
 /** The concept was called "public" before the rename. */
 const LEGACY_LISTED_KEY = "public";
 

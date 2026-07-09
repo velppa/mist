@@ -1,6 +1,5 @@
 import { getAgentByName } from "agents";
-import { parseDocId, docFormat } from "~/shared/constants";
-import { deserializeThreads } from "~/lib/thread-serialization";
+import { parseDocId } from "~/shared/constants";
 import { authenticateNewRequest, type AuthEnv } from "~/lib/auth.server";
 import { readUploadBody, textError } from "~/lib/upload.server";
 
@@ -34,13 +33,9 @@ export async function handleDocUpdate(request: Request, env: unknown): Promise<R
       return content;
     }
 
-    const payload =
-      docFormat(id) === "md"
-        ? (() => {
-            const { body, threads } = deserializeThreads(content);
-            return { content: body, threads };
-          })()
-        : { content };
+    // The document knows its own format (live, switchable state), so
+    // the body is passed through raw and interpreted there.
+    const payload = { content };
 
     const stub = await getAgentByName(authEnv.DocumentAgent, id);
     const res = await stub.fetch(

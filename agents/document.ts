@@ -9,9 +9,11 @@ import {
   MSG_SYNC,
   MSG_AWARENESS,
   DOC_FORMAT_VERSION,
-  REGISTRY_AGENT_NAME, docFormat } from "../app/shared/constants";
+  REGISTRY_AGENT_NAME, effectiveFormat, type DocFormat } from "../app/shared/constants";
 import { extractDocMetaForFormat } from "../app/lib/doc-meta";
+import { deserializeThreads } from "../app/lib/thread-serialization";
 import {
+  FORMAT_KEY,
   LISTED_KEY,
   readListedFlag,
   migrateLegacyListedKey,
@@ -108,6 +110,7 @@ class DocumentAgent extends Agent {
   private awareness: awarenessProtocol.Awareness | null = null;
   private registrySyncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastKnownListed = false;
+  private lastKnownFormat: DocFormat = "md";
 
   /**
    * Durable Object SQLite caps a single value at 2 MB, so the Yjs state
@@ -200,6 +203,7 @@ class DocumentAgent extends Agent {
       this.saveState(Y.encodeStateAsUpdate(this.doc));
     }
     this.lastKnownListed = this.isListed(this.doc);
+    this.lastKnownFormat = this.format(this.doc);
 
     // Persist on every update
     this.doc.on("update", (update: Uint8Array, origin: unknown) => {
@@ -225,8 +229,10 @@ class DocumentAgent extends Agent {
       // Visibility flips must reach the homepage immediately; ordinary
       // edits stay debounced so a burst results in a single registry write.
       const listed = this.isListed(this.doc!);
-      if (listed !== this.lastKnownListed) {
+      const format = this.format(this.doc!);
+      if (listed !== this.lastKnownListed || format !== this.lastKnownFormat) {
         this.lastKnownListed = listed;
+        this.lastKnownFormat = format;
         void this.syncRegistry();
       } else {
         this.scheduleRegistrySync();
@@ -264,6 +270,11 @@ class DocumentAgent extends Agent {
    * Documents are unlisted by default; the shared docState map carries
    * the listing opt-in so the toggle syncs to all clients.
    */
+  /** The document's effective format, stored in the shared docState map. */
+  private format(doc: Y.Doc): DocFormat {
+    return effectiveFormat(doc.getMap<string>("docState").get(FORMAT_KEY));
+  }
+
   private isListed(doc: Y.Doc): boolean {
     return readListedFlag(doc.getMap<string>("docState"));
   }
@@ -289,7 +300,7 @@ class DocumentAgent extends Agent {
       const { doc } = this.ensureInitialised();
       const registry = await getAgentByName(namespace, REGISTRY_AGENT_NAME);
 
-      const { title, author } = extractDocMetaForFormat(this.getPlainText(doc), docFormat(this.name));
+      const { title, author } = extractDocMetaForFormat(this.getPlainText(doc), this.format(doc));
       await registry.fetch(
         new Request("https://registry/upsert", {
           method: "POST",
@@ -299,6 +310,7 @@ class DocumentAgent extends Agent {
             title: title ?? this.name,
             author: this.getStoredAuthor() ?? author,
             listed: this.isListed(doc),
+            format: this.format(doc),
           }),
         }),
       );
@@ -491,6 +503,18 @@ class DocumentAgent extends Agent {
         // Empty/invalid body clears the document
       }
 
+      // The format decides how the body is interpreted: markdown gets
+      // frontmatter/thread handling, everything else stores verbatim.
+      // Decided here (not by the caller) because format is live state.
+      if (this.format(doc) === "md") {
+        if (body.content !== undefined && body.threads === undefined) {
+          const { body: mdBody, threads } = deserializeThreads(body.content ?? "");
+          body = { content: mdBody, threads };
+        }
+      } else {
+        body = { content: body.content };
+      }
+
       const { parseCriticMarkupToContent } = await import("../app/lib/critic-parser");
       try {
         // One transaction: a single update event (linear persist) and a
@@ -564,6 +588,13 @@ class DocumentAgent extends Agent {
         doc.getMap<string>("docState").set(LISTED_KEY, "true");
       }
 
+      // Document format, chosen at creation and switchable later.
+      // Markdown is the default and needs no entry.
+      const requestedFormat = request.headers.get("x-mist-format");
+      if (requestedFormat && effectiveFormat(requestedFormat) !== "md") {
+        doc.getMap<string>("docState").set(FORMAT_KEY, effectiveFormat(requestedFormat));
+      }
+
       // If the request has a JSON body with content, populate the Yjs doc
       const contentType = request.headers.get("Content-Type") || "";
       if (contentType.includes("application/json")) {
@@ -629,9 +660,10 @@ class DocumentAgent extends Agent {
       // matches the "My docs" listing.
       const { doc } = this.ensureInitialised();
       const text = this.getPlainText(doc);
-      const { title } = extractDocMetaForFormat(text, docFormat(this.name));
+      const format = this.format(doc);
+      const { title } = extractDocMetaForFormat(text, format);
 
-      const body: Record<string, unknown> = { exists, createdAt, author, title };
+      const body: Record<string, unknown> = { exists, createdAt, author, title, format };
       // The /raw route needs the verbatim document text
       if (new URL(request.url).searchParams.get("include") === "text") {
         body.text = text;
@@ -654,6 +686,7 @@ class DocumentAgent extends Agent {
       this.doc = null;
       this.awareness = null;
       this.lastKnownListed = false;
+      this.lastKnownFormat = "md";
 
       // The table may not exist yet when deleting a never-created doc
       this.sql`

@@ -2,7 +2,6 @@ import { useMemo, useDeferredValue } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useDocument } from "~/lib/DocumentContext";
-import { docFormat } from "~/shared/constants";
 import { splitFrontmatter } from "~/lib/doc-meta";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
@@ -17,8 +16,7 @@ function renderCriticMarkup(text: string): string {
 }
 
 export default function Preview() {
-  const { markdown, docId } = useDocument();
-  const format = docFormat(docId);
+  const { markdown, format } = useDocument();
   // Deferred: while typing in edit+peek the iframe reloads on every
   // change; deferring batches updates under load without a timer.
   const deferredSource = useDeferredValue(markdown);

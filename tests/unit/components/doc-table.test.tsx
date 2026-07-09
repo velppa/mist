@@ -7,7 +7,7 @@ import DocTable from "~/components/DocTable";
 import type { RegistryEntry } from "~/shared/types";
 
 const doc: RegistryEntry = {
-  id: "4q5dalwz.html",
+  id: "4q5dalwz", format: "html",
   title: "SAPI Override Generator",
   author: "pavel@vio.com",
   listed: true,

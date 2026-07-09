@@ -13,13 +13,15 @@
 		"bindings": [
 			{ "name": "DocumentAgent", "class_name": "DocumentAgent" },
 			{ "name": "DocumentRegistry", "class_name": "DocumentRegistry" },
-			{ "name": "TokenStore", "class_name": "TokenStore" }
+			{ "name": "TokenStore", "class_name": "TokenStore" },
+			{ "name": "AssetStore", "class_name": "AssetStore" }
 		]
 	},
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["DocumentAgent"] },
 		{ "tag": "v2", "new_sqlite_classes": ["DocumentRegistry"] },
-		{ "tag": "v3", "new_sqlite_classes": ["TokenStore"] }
+		{ "tag": "v3", "new_sqlite_classes": ["TokenStore"] },
+		{ "tag": "v4", "new_sqlite_classes": ["AssetStore"] }
 	],
 	"keep_vars": true
 }

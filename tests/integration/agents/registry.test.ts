@@ -16,6 +16,7 @@ interface Row {
   title: string;
   author: string | null;
   listed: number;
+  format?: string;
   created_at: number;
   updated_at: number;
 }
@@ -23,6 +24,7 @@ interface Row {
 let mockRows: Map<string, Row>;
 // Emulates the visibility column's shape across schema generations
 let mockVisibilityColumn: "none" | "public" | "listed";
+let mockHasFormatColumn: boolean;
 
 vi.mock("agents", () => ({
   Agent: class MockAgent {
@@ -37,7 +39,19 @@ vi.mock("agents", () => ({
       if (query.includes("pragma_table_info")) {
         const names = ["id", "title", "author", "created_at", "updated_at"];
         if (mockVisibilityColumn !== "none") names.push(mockVisibilityColumn);
+        if (mockHasFormatColumn) names.push("format");
         return names.map((name) => ({ name }));
+      }
+
+      if (query.includes("add column format")) {
+        if (mockHasFormatColumn) {
+          throw new Error("duplicate column name: format");
+        }
+        mockHasFormatColumn = true;
+        for (const row of mockRows.values()) {
+          if (row.format === undefined) row.format = "md";
+        }
+        return [];
       }
 
       if (query.includes("add column listed")) {
@@ -70,11 +84,12 @@ vi.mock("agents", () => ({
       }
 
       if (query.includes("insert into documents")) {
-        const [id, title, author, listed, createdAt, updatedAt] = values as [
+        const [id, title, author, listed, format, createdAt, updatedAt] = values as [
           string,
           string,
           string | null,
           number,
+          string,
           number,
           number,
         ];
@@ -86,6 +101,7 @@ vi.mock("agents", () => ({
             title,
             author: author ?? existing.author,
             listed,
+            format,
             updated_at: updatedAt,
           });
         } else {
@@ -94,6 +110,7 @@ vi.mock("agents", () => ({
             title,
             author,
             listed,
+            format,
             created_at: createdAt,
             updated_at: updatedAt,
           });
@@ -133,6 +150,7 @@ describe("DocumentRegistry", () => {
 
   beforeEach(async () => {
     mockRows = new Map();
+    mockHasFormatColumn = true;
     mockVisibilityColumn = "listed";
     const mod = await import("../../../agents/registry");
     agent = new mod.default({} as never, {} as never);

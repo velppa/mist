@@ -31,121 +31,68 @@ function call(id: string, query = "") {
   } as unknown as Parameters<typeof loader>[0]);
 }
 
-describe("GET /raw/:id", () => {
+function mockDoc(fields: Record<string, unknown>) {
+  mockAgentFetch.mockResolvedValue(
+    new Response(JSON.stringify({ exists: true, ...fields })),
+  );
+}
+
+describe("GET /raw/:id (always verbatim source)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAgentFetch.mockResolvedValue(
-      new Response(
-        JSON.stringify({ exists: true, text: "# Heading\n\nbody", title: "Heading" }),
-      ),
+    mockDoc({ text: "# Heading\n\nbody", title: "Heading" });
+  });
+
+  it("serves markdown as text/markdown", async () => {
+    const res = (await call("abcd1234")) as Response;
+    expect(res.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8");
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(await res.text()).toBe("# Heading\n\nbody");
+  });
+
+  it("serves txt as text/plain", async () => {
+    mockDoc({ text: "plain text", format: "txt" });
+    const res = (await call("abcd1234")) as Response;
+    expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(await res.text()).toBe("plain text");
+  });
+
+  it("serves jsx as text/plain so the source displays in-browser", async () => {
+    mockDoc({ text: "export default () => null", format: "jsx" });
+    const res = (await call("abcd1234")) as Response;
+    expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(await res.text()).toBe("export default () => null");
+  });
+
+  it("serves ipynb as application/json", async () => {
+    const nb = JSON.stringify({ nbformat: 4, cells: [] });
+    mockDoc({ text: nb, format: "ipynb" });
+    const res = (await call("abcd1234")) as Response;
+    expect(res.headers.get("Content-Type")).toBe(
+      "application/json; charset=utf-8",
     );
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(await res.text()).toBe(nb);
   });
 
-  describe("rendered (default)", () => {
-    it("renders markdown to a sandboxed html page", async () => {
-      const res = (await call("abcd1234")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBe(
-        "sandbox allow-scripts",
-      );
-      expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
-      const body = await res.text();
-      expect(body).toContain("<h1>Heading</h1>");
-      expect(body).toContain("<title>Heading</title>");
-    });
-
-    it("serves txt notes as text/plain (rendered == source)", async () => {
-      const res = (await call("abcd1234.txt")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBeNull();
-      expect(await res.text()).toBe("# Heading\n\nbody");
-    });
-
-    it("serves jsx notes as the sandboxed runner page", async () => {
-      mockAgentFetch.mockResolvedValue(
-        new Response(
-          JSON.stringify({ exists: true, text: "export default () => null" }),
-        ),
-      );
-      const res = (await call("abcd1234.jsx")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBe(
-        "sandbox allow-scripts",
-      );
-      const body = await res.text();
-      expect(body).toContain("unpkg.com/react@18");
-      expect(body).toContain("babel.min.js");
-      expect(body).toContain(JSON.stringify("export default () => null"));
-    });
-
-    it("serves ipynb notes as the sandboxed renderer page", async () => {
-      const nb = JSON.stringify({ nbformat: 4, cells: [] });
-      mockAgentFetch.mockResolvedValue(
-        new Response(JSON.stringify({ exists: true, text: nb })),
-      );
-      const res = (await call("abcd1234.ipynb")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBe(
-        "sandbox allow-scripts",
-      );
-      const body = await res.text();
-      expect(body).toContain("marked.umd.js");
-      expect(body).toContain(JSON.stringify(nb));
-    });
-
-    it("serves html notes verbatim as sandboxed text/html", async () => {
-      mockAgentFetch.mockResolvedValue(
-        new Response(JSON.stringify({ exists: true, text: "<html>hi</html>" })),
-      );
-      const res = (await call("abcd1234.html")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBe(
-        "sandbox allow-scripts",
-      );
-      expect(await res.text()).toBe("<html>hi</html>");
-    });
+  it("serves html verbatim as sandboxed text/html", async () => {
+    mockDoc({ text: "<html>hi</html>", format: "html" });
+    const res = (await call("abcd1234")) as Response;
+    expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("Content-Security-Policy")).toBe(
+      "sandbox allow-scripts",
+    );
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(await res.text()).toBe("<html>hi</html>");
   });
 
-  describe("?source=true", () => {
-    it("serves markdown source as text/markdown without CSP", async () => {
-      const res = (await call("abcd1234", "?source=true")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBeNull();
-      expect(await res.text()).toBe("# Heading\n\nbody");
-    });
-
-    it("serves jsx source as text/plain", async () => {
-      const res = (await call("abcd1234.jsx", "?source=true")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBeNull();
-      expect(await res.text()).toBe("# Heading\n\nbody");
-    });
-
-    it("serves ipynb source verbatim as text/plain", async () => {
-      const nb = JSON.stringify({ nbformat: 4, cells: [] });
-      mockAgentFetch.mockResolvedValue(
-        new Response(JSON.stringify({ exists: true, text: nb })),
-      );
-      const res = (await call("abcd1234.ipynb", "?source=true")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBeNull();
-      expect(await res.text()).toBe(nb);
-    });
-
-    it("serves html source as text/plain so the markup displays", async () => {
-      mockAgentFetch.mockResolvedValue(
-        new Response(JSON.stringify({ exists: true, text: "<html>hi</html>" })),
-      );
-      const res = (await call("abcd1234.html", "?source=true")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-      expect(res.headers.get("Content-Security-Policy")).toBeNull();
-      expect(await res.text()).toBe("<html>hi</html>");
-    });
-
-    it("serves txt source as text/plain", async () => {
-      const res = (await call("abcd1234.txt", "?source=true")) as Response;
-      expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-    });
+  it("ignores the retired ?source=true param", async () => {
+    const res = (await call("abcd1234", "?source=true")) as Response;
+    expect(res.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8");
+    expect(await res.text()).toBe("# Heading\n\nbody");
   });
 
   it("requests the document text from the agent", async () => {
@@ -164,7 +111,6 @@ describe("GET /raw/:id", () => {
   it("resolves title-aliased params to the canonical id", async () => {
     const res = (await call("sapi-override-generator-abcd1234")) as Response;
     expect(res.status).toBe(200);
-    // The agent is addressed by the canonical id, not the alias
     const { getAgentByName } = await import("agents");
     const lastCall = vi.mocked(getAgentByName).mock.calls.at(-1)!;
     expect(lastCall[1]).toBe("abcd1234");

@@ -2,7 +2,7 @@ import { useEffect, useCallback, useRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { Extension, getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import Document from "@tiptap/extension-document";
 import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
@@ -186,6 +186,77 @@ function renderCaret(user: Record<string, unknown>) {
   return cursor;
 }
 
+/**
+ * Upload dropped/pasted images to /assets and insert markdown links.
+ * A unique placeholder is inserted first, then replaced when the
+ * upload settles — positions may shift under collaborative editing,
+ * so the replacement finds the placeholder text instead of trusting
+ * the original coordinates.
+ */
+let uploadCounter = 0;
+
+function insertImageUploads(view: EditorView, files: File[], pos: number | null) {
+  const images = files.filter((f) => f.type.startsWith("image/"));
+  if (images.length === 0) return false;
+
+  for (const file of images) {
+    const placeholder = `![uploading-${++uploadCounter}...]()`;
+    {
+      const tr = view.state.tr;
+      tr.insertText(placeholder, pos ?? view.state.selection.from);
+      view.dispatch(tr);
+    }
+
+    const label = file.name || "image";
+    void fetch(`/assets?name=${encodeURIComponent(label)}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type },
+      body: file,
+    })
+      .then(async (res) => {
+        const v = view;
+        const docText = v.state.doc.textBetween(0, v.state.doc.content.size, "\n");
+        const idx = docText.indexOf(placeholder);
+        if (idx < 0) return; // user removed the placeholder
+        // textBetween offsets shift by node boundaries; find the real
+        // document range by scanning text positions.
+        let from = -1;
+        v.state.doc.descendants((node, nodePos) => {
+          if (from >= 0 || !node.isText || !node.text) return true;
+          const i = node.text.indexOf(placeholder);
+          if (i >= 0) from = nodePos + i;
+          return from < 0;
+        });
+        if (from < 0) return;
+        const to = from + placeholder.length;
+        const tr = v.state.tr;
+        if (res.ok) {
+          const assetUrl = (await res.text()).trim();
+          const alt = label.replace(/\.[A-Za-z0-9]+$/, "") || "image";
+          tr.replaceRangeWith(from, to, v.state.schema.text(`![${alt}](${assetUrl})`));
+        } else {
+          tr.delete(from, to);
+        }
+        v.dispatch(tr);
+      })
+      .catch(() => {
+        // network failure: leave cleanup to the same placeholder scan
+        const v = view;
+        let from = -1;
+        v.state.doc.descendants((node, nodePos) => {
+          if (from >= 0 || !node.isText || !node.text) return true;
+          const i = node.text.indexOf(placeholder);
+          if (i >= 0) from = nodePos + i;
+          return from < 0;
+        });
+        if (from >= 0) {
+          v.dispatch(v.state.tr.delete(from, from + placeholder.length));
+        }
+      });
+  }
+  return true;
+}
+
 export default function Editor({
   yjs,
   hidden,
@@ -241,6 +312,19 @@ export default function Editor({
       editorProps: {
         attributes: {
           class: "tiptap",
+        },
+        handleDrop(view, event) {
+          const files = Array.from(event.dataTransfer?.files ?? []);
+          if (!files.some((f) => f.type.startsWith("image/"))) return false;
+          const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          event.preventDefault();
+          return insertImageUploads(view, files, coords?.pos ?? null);
+        },
+        handlePaste(view, event) {
+          const files = Array.from(event.clipboardData?.files ?? []);
+          if (!files.some((f) => f.type.startsWith("image/"))) return false;
+          event.preventDefault();
+          return insertImageUploads(view, files, null);
         },
       },
     },

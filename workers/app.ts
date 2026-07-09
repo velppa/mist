@@ -2,6 +2,7 @@ import { createRequestHandler, RouterContextProvider } from "react-router";
 import { routeAgentRequest } from "agents";
 import { cloudflareContext } from "../app/lib/cloudflare.server";
 import { handleDocUpdate } from "../app/lib/update.server";
+import { handleAssetUpload, handleAssetGet } from "../app/lib/assets.server";
 import {
   getSessionEmail,
   isSsoConfigured,
@@ -12,6 +13,7 @@ import {
 export { default as DocumentAgent } from "../agents/document";
 export { default as DocumentRegistry } from "../agents/registry";
 export { default as TokenStore } from "../agents/tokens";
+export { default as AssetStore } from "../agents/assets";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -26,8 +28,22 @@ export default {
 
     // The token store trusts the email in its request bodies, so it may
     // only ever be called server-side (getAgentByName) — never routed.
-    if (url.pathname.startsWith("/agents/token-store")) {
+    // The asset store is reachable only through the /assets routes so
+    // naming and validation stay in one place.
+    if (
+      url.pathname.startsWith("/agents/token-store") ||
+      url.pathname.startsWith("/agents/asset-store")
+    ) {
       return new Response("Not found", { status: 404 });
+    }
+
+    // Image uploads and serving. GET is deliberately ungated — see
+    // handleAssetGet for the reasoning.
+    if (url.pathname === "/assets" && request.method === "POST") {
+      return handleAssetUpload(request, env);
+    }
+    if (url.pathname.startsWith("/assets/") && request.method === "GET") {
+      return handleAssetGet(request, env);
     }
 
     // API update: PUT /docs/:id replaces the document. Handled here so

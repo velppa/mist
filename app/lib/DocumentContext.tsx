@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useMemo, useEffect } 
 import { useSearchParams } from "react-router";
 import { getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
 import { parseViewMode, applyViewMode } from "~/lib/view-mode";
+import type { DocFormat } from "~/shared/constants";
 import type { CapturedSelection, DocMode } from "~/shared/types";
 import type { MatchedThread } from "~/lib/comment-threads";
 import type { useYjsEditor } from "~/lib/useYjsEditor";
@@ -14,8 +15,12 @@ const DOC_WIDTHS: DocWidth[] = ["full", "120", "65"];
 
 export interface DocumentContextValue {
   docId: string;
-  // Canonical id decorated with the title slug, for user-facing links
+  // Canonical id decorated with the title slug and the live format
+  // extension, for user-facing links
   aliasId: string;
+  // Live document format (shared state, switchable)
+  format: DocFormat;
+  setFormat: (f: DocFormat) => void;
   createdAt: number | null;
   // Signed-in user's email, null when anonymous / SSO off
   userEmail: string | null;
@@ -85,14 +90,15 @@ export function useDocument(): DocumentContextValue {
 
 export function DocumentProvider({
   docId,
-  aliasId,
+  aliasBase,
   createdAt,
   userEmail = null,
   yjs,
   children,
 }: {
   docId: string;
-  aliasId?: string;
+  /** Slugged id without extension; the live format appends one. */
+  aliasBase?: string;
   createdAt: number | null;
   userEmail?: string | null;
   yjs: ReturnType<typeof useYjsEditor>;
@@ -264,7 +270,9 @@ export function DocumentProvider({
 
   const value: DocumentContextValue = {
     docId,
-    aliasId: aliasId ?? docId,
+    aliasId: `${aliasBase ?? docId}.${yjs.format}`,
+    format: yjs.format,
+    setFormat: yjs.setFormat,
     createdAt,
     userEmail,
     yjs,

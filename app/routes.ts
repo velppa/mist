@@ -10,4 +10,5 @@ export default [
   route("my", "routes/my.tsx"),
   route("docs/:id", "routes/docs.$id.tsx"),
   route("raw/:id", "routes/raw.$id.ts"),
+  route("render/:id", "routes/render.$id.ts"),
 ] satisfies RouteConfig;
