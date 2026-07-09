@@ -233,7 +233,8 @@ class DocumentAgent extends Agent {
       if (listed !== this.lastKnownListed || format !== this.lastKnownFormat) {
         this.lastKnownListed = listed;
         this.lastKnownFormat = format;
-        void this.syncRegistry();
+        // Metadata flip, not a content edit — keep the listing position
+        void this.syncRegistry(false);
       } else {
         this.scheduleRegistrySync();
       }
@@ -287,7 +288,7 @@ class DocumentAgent extends Agent {
    * author claim. Registry failures must never break document editing,
    * so errors are swallowed.
    */
-  private async syncRegistry() {
+  private async syncRegistry(bumpUpdated = true) {
     if (this.registrySyncTimer) {
       clearTimeout(this.registrySyncTimer);
       this.registrySyncTimer = null;
@@ -311,6 +312,7 @@ class DocumentAgent extends Agent {
             author: this.getStoredAuthor() ?? author,
             listed: this.isListed(doc),
             format: this.format(doc),
+            bumpUpdated,
           }),
         }),
       );
@@ -435,36 +437,55 @@ class DocumentAgent extends Agent {
    */
   private pendingReviewReason(doc: Y.Doc): string | null {
     let unresolved = 0;
+    const resolvedTexts = new Set<string>();
     for (const raw of doc.getMap<string>("threads").values()) {
       try {
-        const t = JSON.parse(raw) as { resolved?: boolean };
-        if (!t.resolved) unresolved++;
+        const t = JSON.parse(raw) as { resolved?: boolean; commentText?: string };
+        if (t.resolved) {
+          if (t.commentText) resolvedTexts.add(t.commentText);
+        } else {
+          unresolved++;
+        }
       } catch {
         // Malformed thread entry — treat as unresolved to be safe
         unresolved++;
       }
     }
 
-    // Inline marks: both plain keys and y-tiptap's suffixed variants
-    let commentMarks = false;
+    // Inline marks: both plain keys and y-tiptap's suffixed variants.
+    // Resolving a thread keeps its inline mark, so a comment mark only
+    // counts as pending when no resolved thread carries its text.
+    let pendingCommentMarks = false;
     let suggestions = false;
     for (const el of doc.getXmlFragment("default").toArray()) {
       if (!(el instanceof Y.XmlElement)) continue;
       for (const t of el.toArray()) {
         if (!(t instanceof Y.XmlText)) continue;
-        for (const op of t.toDelta() as Array<{ attributes?: Record<string, unknown> }>) {
-          for (const key of Object.keys(op.attributes ?? {})) {
-            if (/^criticComment(--|$)/.test(key)) commentMarks = true;
-            if (/^critic(Addition|Deletion)(--|$)/.test(key)) suggestions = true;
+        let run = "";
+        const flushRun = () => {
+          if (run && !resolvedTexts.has(run)) pendingCommentMarks = true;
+          run = "";
+        };
+        for (const op of t.toDelta() as Array<{ insert?: unknown; attributes?: Record<string, unknown> }>) {
+          const keys = Object.keys(op.attributes ?? {});
+          const isComment = keys.some((k) => /^criticComment(--|$)/.test(k));
+          if (keys.some((k) => /^critic(Addition|Deletion)(--|$)/.test(k))) {
+            suggestions = true;
+          }
+          if (isComment && typeof op.insert === "string") {
+            run += op.insert;
+          } else {
+            flushRun();
           }
         }
+        flushRun();
       }
     }
 
     const reasons: string[] = [];
     if (unresolved > 0) {
       reasons.push(`${unresolved} unresolved comment${unresolved === 1 ? "" : "s"}`);
-    } else if (commentMarks) {
+    } else if (pendingCommentMarks) {
       reasons.push("unresolved comments");
     }
     if (suggestions) {
@@ -507,7 +528,8 @@ class DocumentAgent extends Agent {
       doc.transact(() => {
         doc.getMap<string>("docState").set(LISTED_KEY, listed ? "true" : "false");
       }, SERVER_ORIGIN);
-      await this.syncRegistry();
+      // Metadata flip — keep the listing position
+      await this.syncRegistry(false);
 
       return new Response(JSON.stringify({ ok: true, listed }), {
         headers: { "Content-Type": "application/json" },

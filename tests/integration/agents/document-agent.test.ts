@@ -407,6 +407,54 @@ describe("DocumentAgent", () => {
     });
   });
 
+  describe("resolved comments", () => {
+    it("PUT succeeds when the only comment thread is resolved", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "text {==hl==}{>>note<<} tail",
+            threads: [
+              {
+                id: "t1",
+                commentText: "note",
+                resolved: true,
+                replies: [],
+              },
+            ],
+          }),
+        }),
+      );
+      const res = await agent.onRequest(
+        new Request("https://do/", {
+          method: "PUT",
+          body: "replacement",
+        }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it("PUT still blocks on an unresolved thread", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "text {==hl==}{>>note<<} tail",
+            threads: [
+              { id: "t1", commentText: "note", resolved: false, replies: [] },
+            ],
+          }),
+        }),
+      );
+      const res = await agent.onRequest(
+        new Request("https://do/", { method: "PUT", body: "replacement" }),
+      );
+      expect(res.status).toBe(409);
+    });
+  });
+
   describe("state chunking", () => {
     it("persists content larger than one chunk row and reloads it", async () => {
       // ~3 MB of text spans multiple 1.5 MB state chunks
@@ -1061,10 +1109,12 @@ describe("DocumentAgent", () => {
         }),
       );
 
-      expect(registryCalls).toContainEqual({
-        path: "/upsert",
-        body: { id: "test-doc", title: "My Title", author: "Alice", listed: true, format: "md" },
-      });
+      expect(registryCalls).toContainEqual(
+        expect.objectContaining({
+          path: "/upsert",
+          body: expect.objectContaining({ id: "test-doc", title: "My Title", author: "Alice", listed: true, format: "md" }),
+        }),
+      );
     });
 
     it("falls back to first line title and null author", async () => {
@@ -1079,10 +1129,12 @@ describe("DocumentAgent", () => {
         }),
       );
 
-      expect(registryCalls).toContainEqual({
-        path: "/upsert",
-        body: { id: "test-doc", title: "just some text", author: null, listed: true, format: "md" },
-      });
+      expect(registryCalls).toContainEqual(
+        expect.objectContaining({
+          path: "/upsert",
+          body: expect.objectContaining({ id: "test-doc", title: "just some text", author: null, listed: true, format: "md" }),
+        }),
+      );
     });
 
     it("registers an empty listed document under its id", async () => {
@@ -1093,20 +1145,24 @@ describe("DocumentAgent", () => {
         }),
       );
 
-      expect(registryCalls).toContainEqual({
-        path: "/upsert",
-        body: { id: "test-doc", title: "test-doc", author: null, listed: true, format: "md" },
-      });
+      expect(registryCalls).toContainEqual(
+        expect.objectContaining({
+          path: "/upsert",
+          body: expect.objectContaining({ id: "test-doc", title: "test-doc", author: null, listed: true, format: "md" }),
+        }),
+      );
     });
 
     it("registers an unlisted document with the listed flag off", async () => {
       await agent.onRequest(new Request("https://do/", { method: "POST" }));
 
       expect(registryCalls.map((c) => c.path)).not.toContain("/remove");
-      expect(registryCalls).toContainEqual({
-        path: "/upsert",
-        body: { id: "test-doc", title: "test-doc", author: null, listed: false, format: "md" },
-      });
+      expect(registryCalls).toContainEqual(
+        expect.objectContaining({
+          path: "/upsert",
+          body: expect.objectContaining({ id: "test-doc", title: "test-doc", author: null, listed: false, format: "md" }),
+        }),
+      );
     });
 
     it("does not sync when the registry binding is absent", async () => {
@@ -1146,7 +1202,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Updated Title", author: null, listed: true, format: "md" },
+          body: { id: "test-doc", title: "Updated Title", author: null, listed: true, format: "md", bumpUpdated: true },
         });
         cleanup(client);
       } finally {
@@ -1179,7 +1235,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Written", author: "Bob", listed: true, format: "md" },
+          body: { id: "test-doc", title: "Written", author: "Bob", listed: true, format: "md", bumpUpdated: true },
         });
         cleanup(client);
       } finally {
@@ -1205,10 +1261,12 @@ describe("DocumentAgent", () => {
         // Visibility flips bypass the debounce — only microtasks elapse
         await vi.advanceTimersByTimeAsync(0);
 
-        expect(registryCalls).toContainEqual({
-          path: "/upsert",
-          body: { id: "test-doc", title: "Secret Draft", author: null, listed: true, format: "md" },
-        });
+        expect(registryCalls).toContainEqual(
+          expect.objectContaining({
+            path: "/upsert",
+            body: expect.objectContaining({ id: "test-doc", title: "Secret Draft", author: null, listed: true, format: "md" }),
+          }),
+        );
         cleanup(client);
       } finally {
         vi.useRealTimers();
@@ -1236,16 +1294,18 @@ describe("DocumentAgent", () => {
         // Withdrawal is immediate as well — only microtasks elapse
         await vi.advanceTimersByTimeAsync(0);
 
-        expect(registryCalls).toContainEqual({
-          path: "/upsert",
-          body: {
+        expect(registryCalls).toContainEqual(
+          expect.objectContaining({
+            path: "/upsert",
+            body: expect.objectContaining({
             id: "test-doc",
             title: "Was Listed",
             author: null,
             listed: false,
             format: "md",
-          },
-        });
+          }),
+          }),
+        );
         expect(registryCalls.map((c) => c.path)).not.toContain("/remove");
         cleanup(client);
       } finally {
@@ -1306,7 +1366,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toEqual([
           {
             path: "/upsert",
-            body: { id: "test-doc", title: "Renamed", author: null, listed: true, format: "md" },
+            body: { id: "test-doc", title: "Renamed", author: null, listed: true, format: "md", bumpUpdated: true },
           },
         ]);
         cleanup(client);

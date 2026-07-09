@@ -84,25 +84,19 @@ vi.mock("agents", () => ({
       }
 
       if (query.includes("insert into documents")) {
-        const [id, title, author, listed, format, createdAt, updatedAt] = values as [
-          string,
-          string,
-          string | null,
-          number,
-          string,
-          number,
-          number,
-        ];
+        const [id, title, author, listed, format, createdAt, updatedAt, bump] =
+          values as [string, string, string | null, number, string, number, number, number];
         const existing = mockRows.get(id);
         if (existing) {
-          // Emulates ON CONFLICT: keep created_at, COALESCE author
+          // Emulates ON CONFLICT: keep created_at, COALESCE author,
+          // CASE on bump for updated_at
           mockRows.set(id, {
             ...existing,
             title,
             author: author ?? existing.author,
             listed,
             format,
-            updated_at: updatedAt,
+            updated_at: bump === 0 ? existing.updated_at : updatedAt,
           });
         } else {
           mockRows.set(id, {
@@ -175,6 +169,32 @@ describe("DocumentRegistry", () => {
     const body = (await res.json()) as { documents: RegistryEntry[] };
     return body.documents;
   }
+
+  describe("updated_at bumping", () => {
+    it("preserves updated_at when bumpUpdated is false", async () => {
+      await upsert({ id: "abc12345", title: "One", listed: true, author: "a@x" });
+      const before = (await list())[0].updatedAt;
+      await new Promise((r) => setTimeout(r, 5));
+      await upsert({
+        id: "abc12345",
+        title: "One",
+        listed: true,
+        author: "a@x",
+        bumpUpdated: false,
+      });
+      const rows = await list();
+      expect(rows[0].updatedAt).toBe(before);
+    });
+
+    it("bumps updated_at by default", async () => {
+      await upsert({ id: "abc12345", title: "One", listed: true, author: "a@x" });
+      const before = (await list())[0].updatedAt;
+      await new Promise((r) => setTimeout(r, 5));
+      await upsert({ id: "abc12345", title: "One v2", listed: true, author: "a@x" });
+      const after = (await list())[0].updatedAt;
+      expect(after).toBeGreaterThan(before);
+    });
+  });
 
   async function byAuthor(email: unknown): Promise<RegistryEntry[]> {
     const res = await agent.onRequest(
@@ -413,3 +433,4 @@ describe("DocumentRegistry", () => {
     expect(res.status).toBe(400);
   });
 });
+

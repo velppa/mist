@@ -15,6 +15,7 @@ interface UpsertPayload {
   author?: unknown;
   listed?: unknown;
   format?: unknown;
+  bumpUpdated?: boolean;
 }
 
 /**
@@ -133,6 +134,9 @@ class DocumentRegistry extends Agent {
       const listed = payload.listed === true ? 1 : 0;
       const format =
         typeof payload.format === "string" && payload.format ? payload.format : "md";
+      // Metadata flips (listed/format) must not reorder listings, so
+      // they leave updated_at alone; content edits bump it.
+      const bump = payload.bumpUpdated !== false ? 1 : 0;
       const now = Date.now();
 
       // Keep created_at from the first upsert; keep a previously known
@@ -145,7 +149,7 @@ class DocumentRegistry extends Agent {
           author = COALESCE(excluded.author, documents.author),
           listed = excluded.listed,
           format = excluded.format,
-          updated_at = excluded.updated_at
+          updated_at = CASE WHEN ${bump} = 1 THEN excluded.updated_at ELSE documents.updated_at END
       `;
 
       return json({ ok: true });

@@ -48,7 +48,7 @@ export default function Preview() {
       <iframe
         srcDoc={markdown}
         sandbox="allow-scripts"
-        className="h-full min-h-[80vh] w-full border-0"
+        className="h-full w-full border-0"
         title="preview"
       />
     );
@@ -63,7 +63,7 @@ export default function Preview() {
       <iframe
         srcDoc={srcDoc}
         sandbox="allow-scripts"
-        className="h-full min-h-[80vh] w-full border-0"
+        className="h-full w-full border-0"
         title="preview"
       />
     );

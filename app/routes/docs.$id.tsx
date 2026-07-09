@@ -200,7 +200,7 @@ function DocumentLayout() {
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-y-auto pb-[33vh] lg:border-r lg:border-border lg:pb-0">
           <div
-            className={`${monoDoc ? "font-mono" : ""} ${
+            className={`h-full ${monoDoc ? "font-mono" : ""} ${
               docWidth === "full"
                 ? ""
                 : `mx-auto ${docWidth === "120" ? "max-w-[120ch]" : "max-w-[65ch]"}`
