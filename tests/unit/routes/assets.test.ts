@@ -59,10 +59,23 @@ describe("POST /assets", () => {
     expect((await res.text()).trim()).toMatch(NAME_PATTERN);
   });
 
-  it("rejects non-image content types", async () => {
+  it("rejects unsupported content types", async () => {
     const res = await upload("hello", { "Content-Type": "text/plain" });
     expect(res.status).toBe(415);
     expect(mockAgentFetch).not.toHaveBeenCalled();
+
+    const bin = await upload(PNG, { "Content-Type": "application/octet-stream" });
+    expect(bin.status).toBe(415);
+  });
+
+  it("stores JSON with a .json name", async () => {
+    const res = await upload('{"a":1}', { "Content-Type": "application/json" }, "?name=run data");
+    expect(res.status).toBe(201);
+    const url = (await res.text()).trim();
+    expect(url).toMatch(/^\/assets\/\d{8}T\d{6}\.\d{6}--run-data\.json$/);
+
+    const stored = mockAgentFetch.mock.calls[0][0] as Request;
+    expect(new URL(stored.url).searchParams.get("type")).toBe("application/json");
   });
 
   it("rejects oversized uploads via content-length", async () => {

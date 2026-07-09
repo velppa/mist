@@ -474,6 +474,46 @@ class DocumentAgent extends Agent {
   }
 
   async onRequest(request: Request) {
+    if (request.method === "POST" && new URL(request.url).pathname === "/listed") {
+      // Flip the homepage-visibility flag. The single write path for
+      // both the DOC menu and the My-docs table; SERVER_ORIGIN makes
+      // the update handler broadcast it to connected editors.
+      const { doc } = this.ensureInitialised();
+
+      const existsRows = this.sql<{ value: ArrayBuffer }>`
+        SELECT value FROM doc_state WHERE key = 'exists'
+      `;
+      if (existsRows.length === 0) {
+        return new Response(JSON.stringify({ ok: false, error: "document not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      let listed: boolean | undefined;
+      try {
+        const body = (await request.json()) as { listed?: unknown };
+        if (typeof body.listed === "boolean") listed = body.listed;
+      } catch {
+        // handled below
+      }
+      if (listed === undefined) {
+        return new Response(JSON.stringify({ ok: false, error: "body must be {\"listed\": true|false}" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      doc.transact(() => {
+        doc.getMap<string>("docState").set(LISTED_KEY, listed ? "true" : "false");
+      }, SERVER_ORIGIN);
+      await this.syncRegistry();
+
+      return new Response(JSON.stringify({ ok: true, listed }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.method === "PUT") {
       // Replace the document content wholesale (API update)
       const { doc } = this.ensureInitialised();

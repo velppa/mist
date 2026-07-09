@@ -63,3 +63,44 @@ export async function handleDocUpdate(request: Request, env: unknown): Promise<R
     return textError("something went wrong", 500);
   }
 }
+
+/**
+ * POST /docs/:id/listed — set the homepage-visibility flag via API.
+ * The single write path for every listed toggle in the UI; the change
+ * reaches open editors through the document's server-origin broadcast.
+ */
+export async function handleListedUpdate(request: Request, env: unknown): Promise<Response> {
+  try {
+    const url = new URL(request.url);
+    const param = decodeURIComponent(
+      url.pathname.slice("/docs/".length, -"/listed".length),
+    );
+    const id = parseDocId(param);
+    if (!id) {
+      return textError("document not found", 404);
+    }
+
+    const authEnv = env as UpdateEnv;
+    const auth = await authenticateNewRequest(request, authEnv);
+    if (!auth.ok) {
+      return textError(auth.message, 401);
+    }
+
+    const stub = await getAgentByName(authEnv.DocumentAgent, id);
+    const res = await stub.fetch(
+      new Request("https://do/listed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: await request.text(),
+      }),
+    );
+
+    const body = await res.text();
+    return new Response(body, {
+      status: res.status,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch {
+    return textError("something went wrong", 500);
+  }
+}

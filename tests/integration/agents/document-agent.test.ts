@@ -602,6 +602,76 @@ describe("DocumentAgent", () => {
   /*  Unsupported HTTP methods                                         */
   /* ================================================================ */
 
+  describe("POST /listed", () => {
+    beforeEach(() => {
+      mockAgentEnv = { DocumentRegistry: {} };
+    });
+
+    async function createDoc() {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "hello" }),
+        }),
+      );
+    }
+
+    it("returns 404 before the document exists", async () => {
+      const res = await agent.onRequest(
+        new Request("https://do/listed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listed: true }),
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects a malformed body", async () => {
+      await createDoc();
+      const res = await agent.onRequest(
+        new Request("https://do/listed", {
+          method: "POST",
+          body: "nope",
+        }),
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("sets the flag and syncs the registry immediately", async () => {
+      await createDoc();
+      registryCalls = [];
+      const res = await agent.onRequest(
+        new Request("https://do/listed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listed: true }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, listed: true });
+      const upsert = registryCalls.find((c) => c.path === "/upsert");
+      expect(upsert?.body.listed).toBe(true);
+    });
+
+    it("broadcasts the change to connected clients", async () => {
+      await createDoc();
+      const client = connectYjsClient();
+      const res = await agent.onRequest(
+        new Request("https://do/listed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listed: true }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      await Promise.resolve();
+      expect(client.doc.getMap<string>("docState").get("listed")).toBe("true");
+      cleanup(client);
+    });
+  });
+
   describe("PUT / (replace content)", () => {
     beforeEach(() => {
       mockAgentEnv = { DocumentRegistry: {} };

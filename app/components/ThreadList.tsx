@@ -11,6 +11,7 @@ export default function ThreadList() {
     resolveThread: onResolve,
     deleteThread: onDelete,
     openCommentInput: onNewComment,
+    editorInstance,
   } = useDocument();
 
   const [showResolved, setShowResolved] = useState(false);
@@ -25,13 +26,15 @@ export default function ThreadList() {
         <span className="text-sm uppercase tracking-wider text-muted">
           Comments ({openThreads.length})
         </span>
-        <button
-          onClick={onNewComment}
-          className="cursor-pointer bg-canary px-2 py-0.5 text-sm font-medium uppercase tracking-wider text-[#1a1a1a] transition-opacity hover:opacity-85"
-          aria-label="New comment"
-        >
-          + Add
-        </button>
+        {editorInstance && (
+          <button
+            onClick={onNewComment}
+            className="cursor-pointer bg-canary px-2 py-0.5 text-sm font-medium uppercase tracking-wider text-[#1a1a1a] transition-opacity hover:opacity-85"
+            aria-label="New comment"
+          >
+            + Add
+          </button>
+        )}
       </div>
 
       {visibleThreads.length === 0 && !showResolved && (

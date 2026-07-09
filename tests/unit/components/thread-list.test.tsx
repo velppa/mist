@@ -58,12 +58,18 @@ describe("ThreadList", () => {
     expect(queryByText("Resolved thread")).toBeTruthy();
   });
 
-  it("new comment button calls openCommentInput", () => {
+  it("new comment button calls openCommentInput when the editor is mounted", () => {
     const { contextValue, getByLabelText } = renderWithDocument(
       createElement(ThreadList),
+      { context: { editorInstance: {} as never } },
     );
 
     fireEvent.click(getByLabelText("New comment"));
     expect(contextValue.openCommentInput).toHaveBeenCalledOnce();
+  });
+
+  it("hides the new comment button without an editor (preview)", () => {
+    const { queryByLabelText } = renderWithDocument(createElement(ThreadList));
+    expect(queryByLabelText("New comment")).toBeNull();
   });
 });

@@ -63,11 +63,15 @@ export default function DocTable({
   showAuthor = false,
   showListed = false,
   renderActions,
+  onToggleListed,
+  pendingListedId,
 }: {
   documents: RegistryEntry[];
   showAuthor?: boolean;
   showListed?: boolean;
   renderActions?: (doc: RegistryEntry) => React.ReactNode;
+  onToggleListed?: (doc: RegistryEntry) => void;
+  pendingListedId?: string | null;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -133,7 +137,22 @@ export default function DocTable({
             )}
             {showListed && (
               <td className="whitespace-nowrap py-2 pr-4 font-mono text-sm uppercase tracking-wider text-muted">
-                {doc.listed ? "listed" : "unlisted"}
+                {onToggleListed ? (
+                  <button
+                    onClick={() => onToggleListed(doc)}
+                    disabled={pendingListedId != null}
+                    aria-pressed={doc.listed}
+                    className={`cursor-pointer uppercase tracking-wider transition-colors hover:text-ink disabled:cursor-default ${
+                      pendingListedId === doc.id ? "opacity-40" : ""
+                    }`}
+                  >
+                    {doc.listed ? "listed" : "unlisted"}
+                  </button>
+                ) : doc.listed ? (
+                  "listed"
+                ) : (
+                  "unlisted"
+                )}
               </td>
             )}
             <td className="whitespace-nowrap py-2 font-mono text-base text-muted">

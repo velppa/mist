@@ -5,7 +5,7 @@ import { Awareness } from "y-protocols/awareness";
 import { YjsProvider } from "./yjs-provider";
 import { USER_COLOURS, effectiveFormat, type DocFormat } from "~/shared/constants";
 import type { UserInfo, DocMode } from "~/shared/types";
-import { FORMAT_KEY, LISTED_KEY, readListedFlag } from "~/shared/doc-state";
+import { FORMAT_KEY, readListedFlag } from "~/shared/doc-state";
 
 function randomUserInfo(name?: string | null): UserInfo {
   const idx = Math.floor(Math.random() * USER_COLOURS.length);
@@ -69,13 +69,6 @@ export function useYjsEditor(
     [docState],
   );
 
-  const setListed = useCallback(
-    (value: boolean) => {
-      docState.set(LISTED_KEY, value ? "true" : "false");
-    },
-    [docState],
-  );
-
   const setFormat = useCallback(
     (value: DocFormat) => {
       docState.set(FORMAT_KEY, value);
@@ -98,5 +91,5 @@ export function useYjsEditor(
     };
   }, [socket, doc, awareness]);
 
-  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, setListed, format, setFormat };
+  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, format, setFormat };
 }

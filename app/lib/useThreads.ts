@@ -42,7 +42,15 @@ export function useThreads({
   // Reconcile: scan document marks, auto-create Y.Map entries for new comments,
   // then match all threads to positions and update state
   const reconcile = useCallback(() => {
-    if (!editor || reconcilingRef.current) return;
+    if (reconcilingRef.current) return;
+    if (!editor) {
+      // Editor-less preview: no marks to scan or positions to match —
+      // list the threads straight from the shared map.
+      const all = readAllThreads(threadsMapRef.current);
+      all.sort((a, b) => a.createdAt - b.createdAt);
+      setThreads(all.map((t) => ({ ...t, position: undefined })));
+      return;
+    }
 
     const comments = scanDocumentComments(editor);
     const allThreads = readAllThreads(threadsMapRef.current);

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { data, Link } from "react-router";
 import type { Route } from "./+types/docs.$id";
 import { getAgentByName } from "agents";
@@ -7,6 +7,7 @@ import { getCloudflare } from "~/lib/cloudflare.server";
 import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { useYjsEditor } from "~/lib/useYjsEditor";
 import { DocumentProvider, useDocument } from "~/lib/DocumentContext";
+import { useCreateDoc } from "~/lib/useCreateDoc";
 import Editor from "~/components/Editor";
 import Preview from "~/components/Preview";
 import PreviewToggle from "~/components/PreviewToggle";
@@ -67,6 +68,13 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
 }
 
 export default function DocumentPage({ loaderData }: Route.ComponentProps) {
+  // Remount everything per document: the Yjs doc/provider are created
+  // once per mount, so an in-app navigation to another doc must not
+  // reuse them (the old state would replay into the new document).
+  return <DocumentView key={loaderData.id} loaderData={loaderData} />;
+}
+
+function DocumentView({ loaderData }: { loaderData: Route.ComponentProps["loaderData"] }) {
   const { id, createdAt, title, format, userEmail } = loaderData;
   const yjs = useYjsEditor(id, userEmail, format);
 
@@ -105,6 +113,14 @@ function DocumentLayout() {
   // monospace face the preview and raw views use.
   const monoDoc = format !== "md";
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const { createNew, uploadFile } = useCreateDoc();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // The editor is expensive on large documents, so it mounts only when
+  // editing starts; once mounted it stays (preview peeks keep state).
+  const [editorWanted, setEditorWanted] = useState(!showPreview);
+  useEffect(() => {
+    if (!showPreview) setEditorWanted(true); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [showPreview]);
 
   const handleCopyUrl = useCallback(async () => {
     await navigator.clipboard.writeText(
@@ -144,6 +160,32 @@ function DocumentLayout() {
             {copiedUrl ? "copied" : "copy url"}
           </button>
         </div>
+        <div className="flex shrink-0 items-stretch border-l border-border">
+          <button
+            onClick={() => void createNew()}
+            className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
+          >
+            New
+          </button>
+        </div>
+        <div className="flex shrink-0 items-stretch border-l border-border">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
+          >
+            Upload
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".md,.txt,.html,.htm,.jsx,.ipynb"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void uploadFile(file);
+            }}
+            className="hidden"
+          />
+        </div>
         <div className="flex shrink-0 items-center border-l border-border px-3">
           <ConnectionStatus />
         </div>
@@ -164,18 +206,20 @@ function DocumentLayout() {
                 : `mx-auto ${docWidth === "120" ? "max-w-[120ch]" : "max-w-[65ch]"}`
             }`}
           >
-            <Editor
-              yjs={yjs}
-              hidden={showPreview}
-              onEditorReady={handleEditorReady}
-              onCommentClick={handleCommentClick}
-              commentHighlight={commentHighlight}
-              activeCommentRange={activeCommentRange}
-              cleanView={cleanView}
-              onNewComment={openCommentInput}
-              onResolveAtCursor={handleResolveAtCursor}
-              onDeleteAtCursor={handleDeleteAtCursor}
-            />
+            {editorWanted && (
+              <Editor
+                yjs={yjs}
+                hidden={showPreview}
+                onEditorReady={handleEditorReady}
+                onCommentClick={handleCommentClick}
+                commentHighlight={commentHighlight}
+                activeCommentRange={activeCommentRange}
+                cleanView={cleanView}
+                onNewComment={openCommentInput}
+                onResolveAtCursor={handleResolveAtCursor}
+                onDeleteAtCursor={handleDeleteAtCursor}
+              />
+            )}
             {showPreview && <Preview />}
           </div>
         </main>

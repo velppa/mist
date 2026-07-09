@@ -12,18 +12,20 @@ interface AssetEnv extends AuthEnv {
   AssetStore: Parameters<typeof getAgentByName>[0];
 }
 
-/** Image content types accepted by POST /assets and their extensions. */
-const IMAGE_EXTENSIONS: Record<string, string> = {
+/** Content types accepted by POST /assets and their extensions. */
+const ASSET_EXTENSIONS: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
   "image/gif": "gif",
   "image/webp": "webp",
   "image/svg+xml": "svg",
   "image/avif": "avif",
+  "application/json": "json",
 };
 
 /**
- * POST /assets — store an image, return its relative URL as plain text:
+ * POST /assets — store an image or JSON blob, return its relative URL
+ * as plain text:
  *   curl -X POST -H "Content-Type: image/png" --data-binary @shot.png \
  *     '<host>/assets?name=shot.png'
  * Auth matches /new (bearer token, session, or open when unconfigured).
@@ -37,10 +39,10 @@ export async function handleAssetUpload(request: Request, env: unknown): Promise
     }
 
     const contentType = (request.headers.get("Content-Type") ?? "").split(";")[0].trim();
-    const extension = IMAGE_EXTENSIONS[contentType];
+    const extension = ASSET_EXTENSIONS[contentType];
     if (!extension) {
       return textError(
-        `unsupported image type "${contentType}" (use ${Object.keys(IMAGE_EXTENSIONS).join(", ")})`,
+        `unsupported content type "${contentType}" (use ${Object.keys(ASSET_EXTENSIONS).join(", ")})`,
         415,
       );
     }
@@ -109,6 +111,10 @@ export async function handleAssetGet(request: Request, env: unknown): Promise<Re
     "Content-Type": contentType,
     "Cache-Control": "public, max-age=31536000, immutable",
     "X-Content-Type-Options": "nosniff",
+    // Sandboxed render/preview pages fetch() assets from an opaque
+    // origin; without CORS those requests fail (plain <img> does not
+    // need this, fetch does). Assets are public, so * is accurate.
+    "Access-Control-Allow-Origin": "*",
   };
   // SVG can carry scripts; the sandbox keeps them inert when the asset
   // is opened directly on the app origin.

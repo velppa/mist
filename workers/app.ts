@@ -1,7 +1,7 @@
 import { createRequestHandler, RouterContextProvider } from "react-router";
 import { routeAgentRequest } from "agents";
 import { cloudflareContext } from "../app/lib/cloudflare.server";
-import { handleDocUpdate } from "../app/lib/update.server";
+import { handleDocUpdate, handleListedUpdate } from "../app/lib/update.server";
 import { handleAssetUpload, handleAssetGet } from "../app/lib/assets.server";
 import {
   getSessionEmail,
@@ -50,6 +50,11 @@ export default {
     // curl gets a plain-text response instead of the rendered page.
     if (request.method === "PUT" && /^\/docs\/[^/]+$/.test(url.pathname)) {
       return handleDocUpdate(request, env);
+    }
+
+    // Listed flag: one write path for the DOC menu and the My-docs table
+    if (request.method === "POST" && /^\/docs\/[^/]+\/listed$/.test(url.pathname)) {
+      return handleListedUpdate(request, env);
     }
 
     if (url.pathname.startsWith("/agents/") && request.method === "POST") {

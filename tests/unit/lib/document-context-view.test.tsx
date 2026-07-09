@@ -93,3 +93,50 @@ describe("document view mode from URL", () => {
     expect(getByTestId("search").textContent).toContain("view=edit");
   });
 });
+
+describe("editor-less preview text", () => {
+  function ProbeMarkdown() {
+    const { markdown } = useDocument();
+    return <span data-testid="md">{markdown}</span>;
+  }
+
+  it("derives markdown from the Yjs doc when no editor is mounted", async () => {
+    const yjs = makeYjs();
+    yjs.doc.transact(() => {
+      const frag = yjs.doc.getXmlFragment("default");
+      const para = new Y.XmlElement("paragraph");
+      const text = new Y.XmlText();
+      para.insert(0, [text]);
+      text.insert(0, "hello ", {});
+      text.insert(6, "world", { criticAddition: {} });
+      frag.insert(0, [para]);
+    });
+
+    const Stub = createRoutesStub([
+      {
+        path: "/docs/:id",
+        Component: () => (
+          <DocumentProvider docId="abc12345" createdAt={null} yjs={yjs}>
+            <ProbeMarkdown />
+          </DocumentProvider>
+        ),
+      },
+    ]);
+    const { getByTestId, findByTestId } = render(
+      <Stub initialEntries={["/docs/abc12345"]} />,
+    );
+    expect(getByTestId("md").textContent).toBe("hello {++world++}");
+
+    // Remote updates keep flowing without an editor
+    yjs.doc.transact(() => {
+      const frag = yjs.doc.getXmlFragment("default");
+      const para = new Y.XmlElement("paragraph");
+      const text = new Y.XmlText();
+      para.insert(0, [text]);
+      text.insert(0, "tail", {});
+      frag.insert(frag.length, [para]);
+    });
+    const el = await findByTestId("md");
+    expect(el.textContent).toBe("hello {++world++}\ntail");
+  });
+});

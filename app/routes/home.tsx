@@ -13,6 +13,7 @@ import { getCloudflare } from "~/lib/cloudflare.server";
 import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { deserializeThreads } from "~/lib/thread-serialization";
 import { useLoaderRefresh } from "~/lib/useLoaderRefresh";
+import { useCreateDoc } from "~/lib/useCreateDoc";
 import ThemeSelector from "~/components/ThemeSelector";
 import DocTable from "~/components/DocTable";
 import UserMenu from "~/components/UserMenu";
@@ -73,13 +74,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   // Newly public documents show up without a manual reload
   useLoaderRefresh();
   const navigate = useNavigate();
+  const { createNew, uploadFile } = useCreateDoc();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  async function handleNewDocument() {
-    const id = generateDocumentId();
-    await fetch(`/agents/document-agent/${id}`, { method: "POST" });
-    // Creators land in edit mode; shared links open in preview by default
-    navigate(`/docs/${id}?view=edit`);
-  }
 
   async function handleDemoDocument() {
     const { body, threads, onboarding } = deserializeThreads(demoDocument);
@@ -92,57 +88,21 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     navigate(`/docs/${id}?view=edit`);
   }
 
-  const handleUpload = useCallback(
-    async (file: File) => {
-      const text = await file.text();
-      // File extension decides the note format; frontmatter/threads are
-      // a markdown concept.
-      const ext = file.name.match(/\.(txt|html?|jsx|ipynb)$/i)?.[1]?.toLowerCase();
-      const format =
-        ext === "txt"
-          ? "txt"
-          : ext === "jsx"
-            ? "jsx"
-            : ext === "ipynb"
-              ? "ipynb"
-              : ext
-                ? "html"
-                : "md";
-      const id = generateDocumentId();
-      const payload =
-        format === "md"
-          ? (() => {
-              const { body, threads } = deserializeThreads(text);
-              return { content: body, threads };
-            })()
-          : { content: text };
-
-      await fetch(`/agents/document-agent/${id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-mist-format": format },
-        body: JSON.stringify(payload),
-      });
-
-      navigate(`/docs/${id}?view=edit`);
-    },
-    [navigate],
-  );
-
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) handleUpload(file);
+      if (file) uploadFile(file);
     },
-    [handleUpload],
+    [uploadFile],
   );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file && /\.(md|txt|html?|jsx|ipynb)$/i.test(file.name)) handleUpload(file);
+      if (file && /\.(md|txt|html?|jsx|ipynb)$/i.test(file.name)) uploadFile(file);
     },
-    [handleUpload],
+    [uploadFile],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -167,7 +127,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </div>
           <div className="flex shrink-0 items-stretch border-l border-border">
             <button
-              onClick={handleNewDocument}
+              onClick={createNew}
               className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
             >
               New document

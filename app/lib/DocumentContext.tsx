@@ -9,6 +9,7 @@ import type { useYjsEditor } from "~/lib/useYjsEditor";
 import { useThreads } from "~/lib/useThreads";
 import { findCommentTextAtCursor } from "~/lib/comment-threads";
 import { serializeWithCriticMarkup } from "~/lib/critic-serializer";
+import { serializeYDocWithCriticMarkup } from "~/lib/y-serializer";
 
 export type DocWidth = "full" | "120" | "65";
 const DOC_WIDTHS: DocWidth[] = ["full", "120", "65"];
@@ -161,8 +162,14 @@ export function DocumentProvider({
   }, []);
 
   const toggleListed = useCallback(() => {
-    yjs.setListed(!yjs.isListed);
-  }, [yjs]);
+    // One write path for the listed flag (shared with the My-docs
+    // table); the state flows back through the server-origin broadcast.
+    fetch(`/docs/${docId}/listed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listed: !yjs.isListed }),
+    }).catch((err) => console.error("listed toggle failed", err));
+  }, [docId, yjs.isListed]);
 
   const handleEditorReady = useCallback((editor: TiptapEditor) => {
     setEditorInstance(editor);
@@ -170,6 +177,17 @@ export function DocumentProvider({
     update();
     editor.on("update", update);
   }, []);
+
+  // Editor-less preview: while no editor is mounted, the preview text
+  // comes straight from the Yjs document. The editor serializer takes
+  // over once mounted (it reflects in-flight ProseMirror state).
+  useEffect(() => {
+    if (editorInstance) return;
+    const update = () => setMarkdown(serializeYDocWithCriticMarkup(yjs.doc));
+    update();
+    yjs.doc.on("update", update);
+    return () => yjs.doc.off("update", update);
+  }, [editorInstance, yjs.doc]);
 
   const handleCommentClick = useCallback(
     (commentText: string) => {

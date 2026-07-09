@@ -375,7 +375,17 @@ export default function Editor({
   useEffect(() => {
     if (!editor || hidden || !yjs.synced || focusedOnceRef.current) return;
     focusedOnceRef.current = true;
-    editor.commands.focus("start");
+    const focusStart = () => {
+      editor.commands.focus("start");
+      // Tiptap's focus command can silently no-op; fall back to the DOM
+      if (!editor.view.hasFocus()) editor.view.dom.focus();
+    };
+    focusStart();
+    // The first attempt can race the ProseMirror view attaching; retry once
+    const retry = window.setTimeout(() => {
+      if (!editor.isDestroyed && !editor.view.hasFocus()) focusStart();
+    }, 150);
+    return () => window.clearTimeout(retry);
   }, [editor, hidden, yjs.synced]);
 
   const handleClick = useCallback(() => {

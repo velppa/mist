@@ -59,6 +59,25 @@ export default function MyDocs({ loaderData }: Route.ComponentProps) {
   // Two-step delete: first click arms the row, second click deletes
   const [armedId, setArmedId] = useState<string | null>(null);
   const revalidator = useRevalidator();
+  const [pendingListedId, setPendingListedId] = useState<string | null>(null);
+
+  async function handleToggleListed(doc: RegistryEntry) {
+    if (pendingListedId) return;
+    setPendingListedId(doc.id);
+    try {
+      const res = await fetch(`/docs/${doc.id}/listed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listed: !doc.listed }),
+      });
+      if (!res.ok) throw new Error(`listed toggle failed: ${res.status}`);
+      revalidator.revalidate();
+    } catch {
+      // leave the row as-is; the next revalidation shows the truth
+    } finally {
+      setPendingListedId(null);
+    }
+  }
 
   async function handleDelete(id: string) {
     if (armedId !== id) {
@@ -91,6 +110,11 @@ export default function MyDocs({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-16">
+      <p className="mb-4">
+        <Link to="/" className="text-ink transition-colors hover:text-coral">
+          &larr; Home
+        </Link>
+      </p>
       <div className="mb-8 flex items-baseline justify-between">
         <h1 className="font-mono font-light uppercase tracking-wider text-muted">
           My documents
@@ -102,6 +126,8 @@ export default function MyDocs({ loaderData }: Route.ComponentProps) {
         <DocTable
           documents={documents}
           showListed
+          onToggleListed={handleToggleListed}
+          pendingListedId={pendingListedId}
           renderActions={(doc) => (
             <button
               onClick={() => void handleDelete(doc.id)}
@@ -119,11 +145,6 @@ export default function MyDocs({ loaderData }: Route.ComponentProps) {
         </p>
       )}
 
-      <p className="mt-12">
-        <Link to="/" className="text-ink transition-colors hover:text-coral">
-          &larr; Home
-        </Link>
-      </p>
     </div>
   );
 }
