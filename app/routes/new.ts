@@ -23,11 +23,12 @@ export function loader() {
   return redirect("/");
 }
 
-/** Explicit ?format=md|txt|html wins; otherwise sniff html; default md.
-Returns null for an unrecognized format value. */
+/** Explicit ?format=md|txt|html|jsx wins; otherwise sniff html; default md.
+Returns null for an unrecognized format value. jsx is never sniffed. */
 function resolveFormat(request: Request, content: string): DocFormat | null {
   const param = new URL(request.url).searchParams.get("format");
-  if (param === "txt" || param === "html" || param === "md") return param;
+  if (param === "txt" || param === "html" || param === "md" || param === "jsx")
+    return param;
   if (param !== null) return null;
   const head = content.trimStart().slice(0, 15).toLowerCase();
   if (head.startsWith("<!doctype") || head.startsWith("<html")) return "html";
@@ -60,7 +61,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
     const format = resolveFormat(request, content);
     if (format === null) {
-      return textError("unknown format (use md, txt or html)", 400);
+      return textError("unknown format (use md, txt, html or jsx)", 400);
     }
     const id =
       generateDocumentId() + (format === "md" ? "" : `.${format}`);

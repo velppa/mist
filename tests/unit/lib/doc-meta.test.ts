@@ -147,3 +147,29 @@ describe("extractDocMetaForFormat", () => {
     expect(meta.author).toBe("a@b.c");
   });
 });
+
+describe("extractDocMetaForFormat: jsx", () => {
+  it("uses the first meaningful line, skipping imports", () => {
+    const meta = extractDocMetaForFormat(
+      '\nimport { useState } from "react";\nconst GFONT = "x";\nmore',
+      "jsx",
+    );
+    expect(meta.title).toBe('const GFONT = "x";');
+  });
+
+  it("strips comment decorations", () => {
+    expect(extractDocMetaForFormat("// My Component\ncode", "jsx").title).toBe(
+      "My Component",
+    );
+    expect(extractDocMetaForFormat("/* Header */\ncode", "jsx").title).toBe(
+      "Header",
+    );
+    expect(extractDocMetaForFormat(" * Doc line\ncode", "jsx").title).toBe(
+      "Doc line",
+    );
+  });
+
+  it("returns null for empty source", () => {
+    expect(extractDocMetaForFormat("", "jsx").title).toBeNull();
+  });
+});

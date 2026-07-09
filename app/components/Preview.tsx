@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useDeferredValue } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useDocument } from "~/lib/DocumentContext";
 import { docFormat } from "~/shared/constants";
+import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 
 /** Replace CriticMarkup delimiters with styled HTML spans before markdown rendering */
 function renderCriticMarkup(text: string): string {
@@ -16,6 +17,9 @@ function renderCriticMarkup(text: string): string {
 export default function Preview() {
   const { markdown, docId } = useDocument();
   const format = docFormat(docId);
+  // Deferred: while typing in edit+peek the iframe reloads on every
+  // change; deferring batches updates under load without a timer.
+  const deferredSource = useDeferredValue(markdown);
 
   const html = useMemo(() => {
     if (format !== "md") return "";
@@ -34,6 +38,18 @@ export default function Preview() {
     return (
       <iframe
         srcDoc={markdown}
+        sandbox="allow-scripts"
+        className="h-full min-h-[80vh] w-full border-0"
+        title="preview"
+      />
+    );
+  }
+
+  if (format === "jsx") {
+    const srcDoc = buildJsxRunnerHtml(deferredSource);
+    return (
+      <iframe
+        srcDoc={srcDoc}
         sandbox="allow-scripts"
         className="h-full min-h-[80vh] w-full border-0"
         title="preview"

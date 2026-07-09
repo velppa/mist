@@ -119,5 +119,19 @@ export function extractDocMetaForFormat(
     }
     case "html":
       return { title: extractHtmlTitle(text), author: null, isListed: false };
+    case "jsx": {
+      // First meaningful line: skip blanks and import/export statements,
+      // strip comment decorations
+      const first = text.split("\n").find((line) => {
+        const t = line.trim();
+        return t && !/^(import|export)\b/.test(t);
+      });
+      const title = first
+        ?.trim()
+        .replace(/^\/\/+\s*|^\/\*+\s*|^\*+\s*/, "")
+        .replace(/\s*\*\/\s*$/, "")
+        .trim();
+      return { title: title || null, author: null, isListed: false };
+    }
   }
 }

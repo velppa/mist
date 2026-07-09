@@ -466,6 +466,31 @@ describe("POST /new formats", () => {
     expect(agentRequest.headers.get("x-mist-listed")).toBeNull();
   });
 
+  it("?format=jsx appends the .jsx suffix and stores body verbatim", async () => {
+    const jsx = 'import { useState } from "react";\nexport default () => <div />;';
+    const response = await action({
+      request: formatRequest(jsx, "jsx"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234.jsx");
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    const body = await agentRequest.json();
+    expect(body.content).toBe(jsx);
+    expect(body.threads).toBeUndefined();
+  });
+
+  it("never sniffs jsx: a jsx-looking body without a param stays markdown", async () => {
+    const response = await action({
+      request: formatRequest('import x from "react";\nexport default x;'),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234\n");
+  });
+
   it("sniffs html from a doctype body without a format param", async () => {
     const response = await action({
       request: formatRequest("  <!DOCTYPE html><html></html>"),

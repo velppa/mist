@@ -1,17 +1,18 @@
 export const APP_NAME = "mist";
 
 /** Document formats, encoded as an id suffix; markdown has none. */
-export type DocFormat = "md" | "txt" | "html";
+export type DocFormat = "md" | "txt" | "html" | "jsx";
 
 /** Format of a document, derived from its id suffix. */
 export function docFormat(id: string): DocFormat {
   if (id.endsWith(".txt")) return "txt";
   if (id.endsWith(".html")) return "html";
+  if (id.endsWith(".jsx")) return "jsx";
   return "md";
 }
 
 export function isValidDocumentId(id: string): boolean {
-  const base = id.replace(/\.(txt|html)$/, "");
+  const base = id.replace(/\.(txt|html|jsx)$/, "");
   if (base.length !== 8) return false;
   return /^[a-z0-9]+$/.test(base);
 }

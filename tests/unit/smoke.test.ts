@@ -26,9 +26,10 @@ describe("isValidDocumentId", () => {
 });
 
 describe("document formats", () => {
-  it("accepts txt and html id suffixes", () => {
+  it("accepts txt, html and jsx id suffixes", () => {
     expect(isValidDocumentId("abcd1234.txt")).toBe(true);
     expect(isValidDocumentId("abcd1234.html")).toBe(true);
+    expect(isValidDocumentId("abcd1234.jsx")).toBe(true);
     expect(isValidDocumentId("abcd1234.pdf")).toBe(false);
     expect(isValidDocumentId(".txt")).toBe(false);
     expect(isValidDocumentId("abcd12345.txt")).toBe(false);
@@ -38,5 +39,6 @@ describe("document formats", () => {
     expect(docFormat("abcd1234")).toBe("md");
     expect(docFormat("abcd1234.txt")).toBe("txt");
     expect(docFormat("abcd1234.html")).toBe("html");
+    expect(docFormat("abcd1234.jsx")).toBe("jsx");
   });
 });
