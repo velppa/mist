@@ -162,7 +162,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           </span>
           <div className="flex grow shrink-0 items-center px-4">
             <span className="text-muted">
-              Share and edit Markdown together, quickly
+              Share and preview documents, for humans and AI agents
             </span>
           </div>
           <div className="flex shrink-0 items-stretch border-l border-border">
