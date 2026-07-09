@@ -12,13 +12,28 @@ export function loader() {
   return redirect("/");
 }
 
-/** Explicit ?format=md|txt|html|jsx wins; otherwise sniff html; default md.
-Returns null for an unrecognized format value. jsx is never sniffed. */
+/** Explicit ?format wins; otherwise sniff notebooks (JSON with nbformat
+and cells), then html; default md. Returns null for an unrecognized
+format value. jsx is never sniffed. */
 function resolveFormat(request: Request, content: string): DocFormat | null {
   const param = new URL(request.url).searchParams.get("format");
-  if (param === "txt" || param === "html" || param === "md" || param === "jsx")
+  if (
+    param === "txt" ||
+    param === "html" ||
+    param === "md" ||
+    param === "jsx" ||
+    param === "ipynb"
+  )
     return param;
   if (param !== null) return null;
+  if (content.trimStart().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      if (parsed && "nbformat" in parsed && "cells" in parsed) return "ipynb";
+    } catch {
+      // Not JSON — fall through to the other sniffs
+    }
+  }
   const head = content.trimStart().slice(0, 15).toLowerCase();
   if (head.startsWith("<!doctype") || head.startsWith("<html")) return "html";
   return "md";
@@ -40,7 +55,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
     const format = resolveFormat(request, content);
     if (format === null) {
-      return textError("unknown format (use md, txt, html or jsx)", 400);
+      return textError("unknown format (use md, txt, html, jsx or ipynb)", 400);
     }
     const id =
       generateDocumentId() + (format === "md" ? "" : `.${format}`);

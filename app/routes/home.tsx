@@ -96,9 +96,17 @@ export default function Home({ loaderData }: Route.ComponentProps) {
       const text = await file.text();
       // File extension decides the note format; frontmatter/threads are
       // a markdown concept.
-      const ext = file.name.match(/\.(txt|html?|jsx)$/i)?.[1]?.toLowerCase();
+      const ext = file.name.match(/\.(txt|html?|jsx|ipynb)$/i)?.[1]?.toLowerCase();
       const suffix =
-        ext === "txt" ? ".txt" : ext === "jsx" ? ".jsx" : ext ? ".html" : "";
+        ext === "txt"
+          ? ".txt"
+          : ext === "jsx"
+            ? ".jsx"
+            : ext === "ipynb"
+              ? ".ipynb"
+              : ext
+                ? ".html"
+                : "";
       const id = generateDocumentId() + suffix;
       const payload = suffix
         ? { content: text }
@@ -130,7 +138,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
     (e: React.DragEvent) => {
       e.preventDefault();
       const file = e.dataTransfer.files[0];
-      if (file && /\.(md|txt|html?|jsx)$/i.test(file.name)) handleUpload(file);
+      if (file && /\.(md|txt|html?|jsx|ipynb)$/i.test(file.name)) handleUpload(file);
     },
     [handleUpload],
   );
@@ -187,7 +195,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".md,.txt,.html,.htm,.jsx"
+          accept=".md,.txt,.html,.htm,.jsx,.ipynb"
           onChange={handleFileChange}
           className="hidden"
         />

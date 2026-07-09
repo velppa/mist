@@ -78,6 +78,21 @@ describe("GET /raw/:id", () => {
       expect(body).toContain(JSON.stringify("export default () => null"));
     });
 
+    it("serves ipynb notes as the sandboxed renderer page", async () => {
+      const nb = JSON.stringify({ nbformat: 4, cells: [] });
+      mockAgentFetch.mockResolvedValue(
+        new Response(JSON.stringify({ exists: true, text: nb })),
+      );
+      const res = (await call("abcd1234.ipynb")) as Response;
+      expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+      expect(res.headers.get("Content-Security-Policy")).toBe(
+        "sandbox allow-scripts",
+      );
+      const body = await res.text();
+      expect(body).toContain("marked.umd.js");
+      expect(body).toContain(JSON.stringify(nb));
+    });
+
     it("serves html notes verbatim as sandboxed text/html", async () => {
       mockAgentFetch.mockResolvedValue(
         new Response(JSON.stringify({ exists: true, text: "<html>hi</html>" })),
@@ -104,6 +119,17 @@ describe("GET /raw/:id", () => {
       expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
       expect(res.headers.get("Content-Security-Policy")).toBeNull();
       expect(await res.text()).toBe("# Heading\n\nbody");
+    });
+
+    it("serves ipynb source verbatim as text/plain", async () => {
+      const nb = JSON.stringify({ nbformat: 4, cells: [] });
+      mockAgentFetch.mockResolvedValue(
+        new Response(JSON.stringify({ exists: true, text: nb })),
+      );
+      const res = (await call("abcd1234.ipynb", "?source=true")) as Response;
+      expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+      expect(res.headers.get("Content-Security-Policy")).toBeNull();
+      expect(await res.text()).toBe(nb);
     });
 
     it("serves html source as text/plain so the markup displays", async () => {

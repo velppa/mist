@@ -173,3 +173,28 @@ describe("extractDocMetaForFormat: jsx", () => {
     expect(extractDocMetaForFormat("", "jsx").title).toBeNull();
   });
 });
+
+describe("extractDocMetaForFormat: ipynb", () => {
+  it("uses the first markdown heading", () => {
+    const nb = JSON.stringify({
+      nbformat: 4,
+      cells: [
+        { cell_type: "code", source: ["1+1"] },
+        { cell_type: "markdown", source: ["intro text\n", "# Real Title\n"] },
+      ],
+    });
+    expect(extractDocMetaForFormat(nb, "ipynb").title).toBe("Real Title");
+  });
+
+  it("falls back to null without markdown headings", () => {
+    const nb = JSON.stringify({
+      nbformat: 4,
+      cells: [{ cell_type: "code", source: ["print(1)"] }],
+    });
+    expect(extractDocMetaForFormat(nb, "ipynb").title).toBeNull();
+  });
+
+  it("never titles from malformed JSON", () => {
+    expect(extractDocMetaForFormat("{not json", "ipynb").title).toBeNull();
+  });
+});

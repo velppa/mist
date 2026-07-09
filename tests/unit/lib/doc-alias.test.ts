@@ -30,6 +30,12 @@ describe("parseDocId", () => {
   });
 });
 
+it("parses ipynb ids, bare and aliased", () => {
+  expect(parseDocId("abcd1234.ipynb")).toBe("abcd1234.ipynb");
+  expect(parseDocId("my-notebook-abcd1234.ipynb")).toBe("abcd1234.ipynb");
+  expect(parseDocId("bad-zzz.ipynb")).toBeNull();
+});
+
 describe("docSlug", () => {
   it("kebab-cases titles", () => {
     expect(docSlug("SAPI Override Generator")).toBe("sapi-override-generator");

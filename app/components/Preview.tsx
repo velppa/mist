@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { useDocument } from "~/lib/DocumentContext";
 import { docFormat } from "~/shared/constants";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
+import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 
 /** Replace CriticMarkup delimiters with styled HTML spans before markdown rendering */
 function renderCriticMarkup(text: string): string {
@@ -45,8 +46,11 @@ export default function Preview() {
     );
   }
 
-  if (format === "jsx") {
-    const srcDoc = buildJsxRunnerHtml(deferredSource);
+  if (format === "jsx" || format === "ipynb") {
+    const srcDoc =
+      format === "jsx"
+        ? buildJsxRunnerHtml(deferredSource)
+        : buildIpynbRunnerHtml(deferredSource);
     return (
       <iframe
         srcDoc={srcDoc}

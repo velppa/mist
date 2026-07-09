@@ -491,6 +491,41 @@ describe("POST /new formats", () => {
     expect(await response.text()).toContain("/docs/abcd1234\n");
   });
 
+  it("?format=ipynb appends the .ipynb suffix and stores body verbatim", async () => {
+    const nb = JSON.stringify({ nbformat: 4, cells: [] });
+    const response = await action({
+      request: formatRequest(nb, "ipynb"),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234.ipynb");
+    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
+    const body = await agentRequest.json();
+    expect(body.content).toBe(nb);
+  });
+
+  it("sniffs a notebook from JSON with nbformat and cells", async () => {
+    const nb = JSON.stringify({ nbformat: 4, nbformat_minor: 5, cells: [] });
+    const response = await action({
+      request: formatRequest(nb),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234.ipynb");
+  });
+
+  it("plain JSON without nbformat stays markdown", async () => {
+    const response = await action({
+      request: formatRequest(JSON.stringify({ hello: "world" })),
+      context,
+    } as Parameters<typeof action>[0]);
+
+    expect(response.status).toBe(201);
+    expect(await response.text()).toContain("/docs/abcd1234\n");
+  });
+
   it("sniffs html from a doctype body without a format param", async () => {
     const response = await action({
       request: formatRequest("  <!DOCTYPE html><html></html>"),

@@ -1,18 +1,19 @@
 export const APP_NAME = "mist";
 
 /** Document formats, encoded as an id suffix; markdown has none. */
-export type DocFormat = "md" | "txt" | "html" | "jsx";
+export type DocFormat = "md" | "txt" | "html" | "jsx" | "ipynb";
 
 /** Format of a document, derived from its id suffix. */
 export function docFormat(id: string): DocFormat {
   if (id.endsWith(".txt")) return "txt";
   if (id.endsWith(".html")) return "html";
   if (id.endsWith(".jsx")) return "jsx";
+  if (id.endsWith(".ipynb")) return "ipynb";
   return "md";
 }
 
 export function isValidDocumentId(id: string): boolean {
-  const base = id.replace(/\.(txt|html|jsx)$/, "");
+  const base = id.replace(/\.(txt|html|jsx|ipynb)$/, "");
   if (base.length !== 8) return false;
   return /^[a-z0-9]+$/.test(base);
 }
@@ -25,7 +26,7 @@ export function isValidDocumentId(id: string): boolean {
  */
 export function parseDocId(param: string): string | null {
   if (isValidDocumentId(param)) return param;
-  const match = param.match(/-([a-z0-9]{8}(?:\.(?:txt|html|jsx))?)$/);
+  const match = param.match(/-([a-z0-9]{8}(?:\.(?:txt|html|jsx|ipynb))?)$/);
   if (match && isValidDocumentId(match[1])) return match[1];
   return null;
 }
@@ -58,7 +59,7 @@ export function docAliasPath(id: string, title?: string | null): string {
 export function docAliasId(id: string, title?: string | null): string {
   const slug = title ? docSlug(title) : "";
   // A slug that is just the id (or empty) adds nothing
-  if (!slug || slug === id.replace(/\.(txt|html|jsx)$/, "")) {
+  if (!slug || slug === id.replace(/\.(txt|html|jsx|ipynb)$/, "")) {
     return id;
   }
   return `${slug}-${id}`;

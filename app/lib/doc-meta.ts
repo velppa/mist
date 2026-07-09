@@ -133,5 +133,24 @@ export function extractDocMetaForFormat(
         .trim();
       return { title: title || null, author: null, isListed: false };
     }
+    case "ipynb": {
+      // First markdown heading in the notebook; raw JSON never makes a title
+      try {
+        const nb = JSON.parse(text) as {
+          cells?: Array<{ cell_type?: string; source?: string | string[] }>;
+        };
+        for (const cell of nb.cells ?? []) {
+          if (cell.cell_type !== "markdown") continue;
+          const src = Array.isArray(cell.source)
+            ? cell.source.join("")
+            : (cell.source ?? "");
+          const m = src.match(/^#+\s+(.+)$/m);
+          if (m) return { title: m[1].trim(), author: null, isListed: false };
+        }
+      } catch {
+        // Malformed notebook — untitled
+      }
+      return { title: null, author: null, isListed: false };
+    }
   }
 }

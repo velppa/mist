@@ -5,11 +5,13 @@ import type { Route } from "./+types/raw.$id";
 import { parseDocId, docFormat } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
+import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 
 const SOURCE_CONTENT_TYPES = {
   md: "text/markdown; charset=utf-8",
   txt: "text/plain; charset=utf-8",
   jsx: "text/plain; charset=utf-8",
+  ipynb: "text/plain; charset=utf-8",
   // Source view must display the markup, not render it
   html: "text/plain; charset=utf-8",
 } as const;
@@ -104,7 +106,9 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
       ? (text ?? "")
       : format === "jsx"
         ? buildJsxRunnerHtml(text ?? "")
-        : markdownPage(title ?? id, text ?? "");
+        : format === "ipynb"
+          ? buildIpynbRunnerHtml(text ?? "")
+          : markdownPage(title ?? id, text ?? "");
 
   return new Response(body, { headers });
 }
