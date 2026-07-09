@@ -1,7 +1,8 @@
+import { useState, useCallback } from "react";
 import { data, Link } from "react-router";
 import type { Route } from "./+types/docs.$id";
 import { getAgentByName } from "agents";
-import { isValidDocumentId } from "~/shared/constants";
+import { docAliasId, docFormat, parseDocId } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { getSessionEmail, type AuthEnv } from "~/lib/auth.server";
 import { useYjsEditor } from "~/lib/useYjsEditor";
@@ -29,8 +30,10 @@ export function meta({ data }: Route.MetaArgs) {
 }
 
 export async function loader({ params, context, request }: Route.LoaderArgs) {
-  const id = params.id;
-  if (!isValidDocumentId(id)) {
+  // The path param may carry a decorative title alias; the trailing
+  // id segment is authoritative.
+  const id = parseDocId(params.id);
+  if (!id) {
     throw data(null, { status: 404 });
   }
 
@@ -55,17 +58,23 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
 }
 
 export default function DocumentPage({ loaderData }: Route.ComponentProps) {
-  const { id, createdAt, userEmail } = loaderData;
+  const { id, createdAt, title, userEmail } = loaderData;
   const yjs = useYjsEditor(id, userEmail);
 
   return (
-    <DocumentProvider docId={id} createdAt={createdAt} userEmail={userEmail} yjs={yjs}>
-      <DocumentLayout id={id} />
+    <DocumentProvider
+      docId={id}
+      aliasId={docAliasId(id, title)}
+      createdAt={createdAt}
+      userEmail={userEmail}
+      yjs={yjs}
+    >
+      <DocumentLayout />
     </DocumentProvider>
   );
 }
 
-function DocumentLayout({ id }: { id: string }) {
+function DocumentLayout() {
   const {
     yjs,
     showPreview,
@@ -80,7 +89,21 @@ function DocumentLayout({ id }: { id: string }) {
     mode,
     userEmail,
     docWidth,
+    aliasId,
+    docId,
   } = useDocument();
+  // Non-markdown notes are source text; edit them in the same
+  // monospace face the preview and raw views use.
+  const monoDoc = docFormat(docId) !== "md";
+  const [copiedUrl, setCopiedUrl] = useState(false);
+
+  const handleCopyUrl = useCallback(async () => {
+    await navigator.clipboard.writeText(
+      `${window.location.origin}/docs/${aliasId}`,
+    );
+    setCopiedUrl(true);
+    setTimeout(() => setCopiedUrl(false), 2000);
+  }, [aliasId]);
 
   return (
     <div className="flex h-screen flex-col">
@@ -92,13 +115,19 @@ function DocumentLayout({ id }: { id: string }) {
           mist
         </Link>
         <div className="flex grow shrink-0 items-center gap-3 px-4">
-          <span className="font-mono font-bold">{id}</span>
+          <span className="font-mono font-bold">{aliasId}</span>
           <a
-            href={`/raw/${id}`}
+            href={`/raw/${aliasId}`}
             className="border border-border px-2.5 py-0.5 text-sm uppercase tracking-wider text-ink transition-colors hover:bg-ink hover:text-paper"
           >
             raw
           </a>
+          <button
+            onClick={handleCopyUrl}
+            className="cursor-pointer whitespace-nowrap border border-border px-2.5 py-0.5 text-sm uppercase tracking-wider text-ink transition-colors hover:bg-ink hover:text-paper"
+          >
+            {copiedUrl ? "copied" : "copy url"}
+          </button>
         </div>
         <div className="flex shrink-0 items-center border-l border-border px-3">
           <ConnectionStatus />
@@ -114,11 +143,11 @@ function DocumentLayout({ id }: { id: string }) {
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-y-auto pb-[33vh] lg:border-r lg:border-border lg:pb-0">
           <div
-            className={
+            className={`${monoDoc ? "font-mono" : ""} ${
               docWidth === "full"
-                ? undefined
+                ? ""
                 : `mx-auto ${docWidth === "120" ? "max-w-[120ch]" : "max-w-[65ch]"}`
-            }
+            }`}
           >
             <Editor
               yjs={yjs}

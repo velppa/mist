@@ -17,6 +17,53 @@ export function isValidDocumentId(id: string): boolean {
   return /^[a-z0-9]+$/.test(base);
 }
 
+/**
+ * Canonical id of a /docs or /raw path parameter. The parameter may
+ * carry a decorative title alias ("sapi-override-generator-4q5dalwz.html");
+ * the trailing 8-char segment is authoritative. Returns null when no
+ * valid id can be extracted.
+ */
+export function parseDocId(param: string): string | null {
+  if (isValidDocumentId(param)) return param;
+  const match = param.match(/-([a-z0-9]{8}(?:\.(?:txt|html|jsx))?)$/);
+  if (match && isValidDocumentId(match[1])) return match[1];
+  return null;
+}
+
+/** Kebab-case slug of a title, empty when nothing usable survives. */
+export function docSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 60)
+    .replace(/-$/, "");
+}
+
+/**
+ * Path to a document, with a title-derived alias when the title
+ * yields one ("/docs/<slug>-<id>", else "/docs/<id>").
+ */
+export function docAliasPath(id: string, title?: string | null): string {
+  return `/docs/${docAliasId(id, title)}`;
+}
+
+/**
+ * Id decorated with the title-derived alias ("<slug>-<id>"), or the
+ * plain id when the title yields no useful slug.
+ */
+export function docAliasId(id: string, title?: string | null): string {
+  const slug = title ? docSlug(title) : "";
+  // A slug that is just the id (or empty) adds nothing
+  if (!slug || slug === id.replace(/\.(txt|html|jsx)$/, "")) {
+    return id;
+  }
+  return `${slug}-${id}`;
+}
+
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 const ID_LENGTH = 8;
 

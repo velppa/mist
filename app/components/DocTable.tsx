@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import type { RegistryEntry } from "~/shared/types";
-import { docFormat } from "~/shared/constants";
+import { docFormat, docAliasPath } from "~/shared/constants";
 
 type SortKey = "title" | "format" | "author" | "listed" | "updatedAt";
 type SortDir = "asc" | "desc";
@@ -117,7 +117,7 @@ export default function DocTable({
           <tr key={doc.id} className="border-t border-border">
             <td className="w-full py-2 pr-4">
               <Link
-                to={`/docs/${doc.id}`}
+                to={docAliasPath(doc.id, doc.title)}
                 className="block text-ink transition-colors hover:text-coral"
               >
                 {doc.title}

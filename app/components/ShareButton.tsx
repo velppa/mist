@@ -5,7 +5,7 @@ import { serializeThreads } from "~/lib/thread-serialization";
 import { useDocument } from "~/lib/DocumentContext";
 
 export default function ShareButton() {
-  const { docId, markdown, threads, isListed, toggleListed } = useDocument();
+  const { docId, aliasId, markdown, threads, isListed, toggleListed } = useDocument();
   const [copied, setCopied] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const navigate = useNavigate();
@@ -69,7 +69,7 @@ export default function ShareButton() {
           </DropdownMenu.Item>
           <DropdownMenu.Item asChild>
             <a
-              href={`/raw/${docId}`}
+              href={`/raw/${aliasId}`}
               target="_blank"
               rel="noopener noreferrer"
               className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"

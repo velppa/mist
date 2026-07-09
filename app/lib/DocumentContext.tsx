@@ -14,6 +14,8 @@ const DOC_WIDTHS: DocWidth[] = ["full", "120", "65"];
 
 export interface DocumentContextValue {
   docId: string;
+  // Canonical id decorated with the title slug, for user-facing links
+  aliasId: string;
   createdAt: number | null;
   // Signed-in user's email, null when anonymous / SSO off
   userEmail: string | null;
@@ -83,12 +85,14 @@ export function useDocument(): DocumentContextValue {
 
 export function DocumentProvider({
   docId,
+  aliasId,
   createdAt,
   userEmail = null,
   yjs,
   children,
 }: {
   docId: string;
+  aliasId?: string;
   createdAt: number | null;
   userEmail?: string | null;
   yjs: ReturnType<typeof useYjsEditor>;
@@ -260,6 +264,7 @@ export function DocumentProvider({
 
   const value: DocumentContextValue = {
     docId,
+    aliasId: aliasId ?? docId,
     createdAt,
     userEmail,
     yjs,

@@ -33,6 +33,48 @@ function sqlBlob(data: Uint8Array): string {
   return data as unknown as string;
 }
 
+/** Yjs transaction origin marking server-side content replacement. */
+const SERVER_ORIGIN = "mist-server";
+
+type CriticParse = (line: string) => {
+  cleanText: string;
+  marks: Array<{ type: string; from: number; to: number; attrs?: Record<string, unknown> }>;
+};
+
+/**
+ * Build paragraph elements for the whole content in one pass. All
+ * paragraphs are created first and inserted once by the caller: indexed
+ * inserts walk the item list from the head, so per-line appends are
+ * quadratic on large documents.
+ */
+function buildParagraphs(content: string, parse: CriticParse): Y.XmlElement[] {
+  return content.split("\n").map((line) => {
+    const { cleanText, marks } = parse(line);
+    const para = new Y.XmlElement("paragraph");
+    const ytext = new Y.XmlText(cleanText);
+    // Apply marks via Yjs formatting attributes
+    for (const mark of marks) {
+      const attrs: Record<string, Record<string, unknown>> = {};
+      attrs[mark.type] = mark.attrs ?? {};
+      ytext.format(mark.from, mark.to - mark.from, attrs);
+    }
+    para.insert(0, [ytext]);
+    return para;
+  });
+}
+
+/** Import serialized comment threads into the Yjs threads map. */
+function applyThreads(doc: Y.Doc, threads: unknown) {
+  if (!threads || !Array.isArray(threads)) return;
+  const threadsMap = doc.getMap<string>("threads");
+  for (const thread of threads) {
+    const t = thread as { id?: string };
+    if (t.id) {
+      threadsMap.set(t.id, JSON.stringify(thread));
+    }
+  }
+}
+
 /**
  * Extract the plain text of a Yjs XML node, ignoring formatting marks
  * (CriticMarkup additions/deletions render as attributes, not text).
@@ -160,8 +202,25 @@ class DocumentAgent extends Agent {
     this.lastKnownListed = this.isListed(this.doc);
 
     // Persist on every update
-    this.doc.on("update", () => {
+    this.doc.on("update", (update: Uint8Array, origin: unknown) => {
       this.saveState(Y.encodeStateAsUpdate(this.doc!));
+
+      // Client edits reach other clients by raw-message relay in
+      // onMessage; server-side replacements (PUT) must be pushed
+      // explicitly or open tabs would silently diverge.
+      if (origin === SERVER_ORIGIN) {
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint(encoder, MSG_SYNC);
+        syncProtocol.writeUpdate(encoder, update);
+        const message = encoding.toUint8Array(encoder);
+        for (const conn of this.getConnections()) {
+          try {
+            conn.send(message);
+          } catch {
+            // Connection already gone
+          }
+        }
+      }
 
       // Visibility flips must reach the homepage immediately; ordinary
       // edits stay debounced so a burst results in a single registry write.
@@ -357,7 +416,116 @@ class DocumentAgent extends Agent {
     }
   }
 
+  /**
+   * Reason the document cannot be replaced wholesale, or null when clean.
+   * Unresolved comment threads and pending suggest-mode edits represent
+   * review state that a blind overwrite would destroy.
+   */
+  private pendingReviewReason(doc: Y.Doc): string | null {
+    let unresolved = 0;
+    for (const raw of doc.getMap<string>("threads").values()) {
+      try {
+        const t = JSON.parse(raw) as { resolved?: boolean };
+        if (!t.resolved) unresolved++;
+      } catch {
+        // Malformed thread entry — treat as unresolved to be safe
+        unresolved++;
+      }
+    }
+
+    // Inline marks: both plain keys and y-tiptap's suffixed variants
+    let commentMarks = false;
+    let suggestions = false;
+    for (const el of doc.getXmlFragment("default").toArray()) {
+      if (!(el instanceof Y.XmlElement)) continue;
+      for (const t of el.toArray()) {
+        if (!(t instanceof Y.XmlText)) continue;
+        for (const op of t.toDelta() as Array<{ attributes?: Record<string, unknown> }>) {
+          for (const key of Object.keys(op.attributes ?? {})) {
+            if (/^criticComment(--|$)/.test(key)) commentMarks = true;
+            if (/^critic(Addition|Deletion)(--|$)/.test(key)) suggestions = true;
+          }
+        }
+      }
+    }
+
+    const reasons: string[] = [];
+    if (unresolved > 0) {
+      reasons.push(`${unresolved} unresolved comment${unresolved === 1 ? "" : "s"}`);
+    } else if (commentMarks) {
+      reasons.push("unresolved comments");
+    }
+    if (suggestions) {
+      reasons.push("pending suggestions");
+    }
+    return reasons.length > 0 ? `cannot update: ${reasons.join(", ")}` : null;
+  }
+
   async onRequest(request: Request) {
+    if (request.method === "PUT") {
+      // Replace the document content wholesale (API update)
+      const { doc } = this.ensureInitialised();
+
+      const existsRows = this.sql<{ value: ArrayBuffer }>`
+        SELECT value FROM doc_state WHERE key = 'exists'
+      `;
+      if (existsRows.length === 0) {
+        return new Response(JSON.stringify({ ok: false, error: "document not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const conflict = this.pendingReviewReason(doc);
+      if (conflict) {
+        return new Response(JSON.stringify({ ok: false, error: conflict }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      let body: { content?: string; threads?: unknown[] } = {};
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        // Empty/invalid body clears the document
+      }
+
+      const { parseCriticMarkupToContent } = await import("../app/lib/critic-parser");
+      try {
+        // One transaction: a single update event (linear persist) and a
+        // single broadcast to connected clients. The SERVER_ORIGIN marker
+        // makes the update handler push it over the open WebSockets.
+        doc.transact(() => {
+          const frag = doc.getXmlFragment("default");
+          frag.delete(0, frag.length);
+          const threadsMap = doc.getMap<string>("threads");
+          for (const key of Array.from(threadsMap.keys())) {
+            threadsMap.delete(key);
+          }
+          if (body.content) {
+            frag.insert(0, buildParagraphs(body.content, parseCriticMarkupToContent));
+          }
+          applyThreads(doc, body.threads);
+        }, SERVER_ORIGIN);
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("Unsupported CriticMarkup")) {
+          return new Response(JSON.stringify({ ok: false, error: err.message }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        throw err;
+      }
+
+      // Title likely changed — register immediately
+      await this.syncRegistry();
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     if (request.method === "POST") {
       // Create / initialise the document
       const { doc } = this.ensureInitialised();
@@ -407,38 +575,12 @@ class DocumentAgent extends Agent {
           const { parseCriticMarkupToContent } = await import("../app/lib/critic-parser");
           doc.transact(() => {
             if (body.content) {
-              // Parse CriticMarkup and apply as marks on XmlText
               const frag = doc.getXmlFragment("default");
               if (frag.length === 0) {
-                const lines = body.content!.split("\n");
-                // Build all paragraphs first and insert once: indexed
-                // inserts walk the item list from the head, so per-line
-                // appends are quadratic on large documents.
-                const paras = lines.map((line) => {
-                  const { cleanText, marks } = parseCriticMarkupToContent(line);
-                  const para = new Y.XmlElement("paragraph");
-                  const ytext = new Y.XmlText(cleanText);
-                  // Apply marks via Yjs formatting attributes
-                  for (const mark of marks) {
-                    const attrs: Record<string, Record<string, unknown>> = {};
-                    attrs[mark.type] = mark.attrs ?? {};
-                    ytext.format(mark.from, mark.to - mark.from, attrs);
-                  }
-                  para.insert(0, [ytext]);
-                  return para;
-                });
-                frag.insert(0, paras);
+                frag.insert(0, buildParagraphs(body.content!, parseCriticMarkupToContent));
               }
             }
-            if (body.threads && Array.isArray(body.threads)) {
-              const threadsMap = doc.getMap<string>("threads");
-              for (const thread of body.threads) {
-                const t = thread as { id?: string };
-                if (t.id) {
-                  threadsMap.set(t.id, JSON.stringify(thread));
-                }
-              }
-            }
+            applyThreads(doc, body.threads);
             if (body.onboarding) {
               const docState = doc.getMap<string>("docState");
               docState.set("onboarding", "true");

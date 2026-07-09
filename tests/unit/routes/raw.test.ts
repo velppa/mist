@@ -135,6 +135,15 @@ describe("GET /raw/:id", () => {
     await expect(call("abcd1234")).rejects.toMatchObject({ status: 404 });
   });
 
+  it("resolves title-aliased params to the canonical id", async () => {
+    const res = (await call("sapi-override-generator-abcd1234")) as Response;
+    expect(res.status).toBe(200);
+    // The agent is addressed by the canonical id, not the alias
+    const { getAgentByName } = await import("agents");
+    const lastCall = vi.mocked(getAgentByName).mock.calls.at(-1)!;
+    expect(lastCall[1]).toBe("abcd1234");
+  });
+
   it("404s for an invalid id", async () => {
     await expect(call("abcd1234.pdf")).rejects.toMatchObject({ status: 404 });
     expect(mockAgentFetch).not.toHaveBeenCalled();

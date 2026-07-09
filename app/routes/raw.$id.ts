@@ -2,7 +2,7 @@ import { data } from "react-router";
 import { getAgentByName } from "agents";
 import { marked } from "marked";
 import type { Route } from "./+types/raw.$id";
-import { isValidDocumentId, docFormat } from "~/shared/constants";
+import { parseDocId, docFormat } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 
@@ -62,8 +62,8 @@ ${body}
  * ?source=true: the verbatim source for every format.
  */
 export async function loader({ params, context, request }: Route.LoaderArgs) {
-  const id = params.id;
-  if (!isValidDocumentId(id)) {
+  const id = parseDocId(params.id);
+  if (!id) {
     throw data(null, { status: 404 });
   }
 

@@ -258,7 +258,8 @@ body {
 .preview {
   padding: 1.5rem;
   font-size: 1.15rem;
-  line-height: 1.7;
+  /* Match .tiptap so toggling edit/preview doesn't reflow lines */
+  line-height: 1.6;
   color: var(--color-ink);
 }
 

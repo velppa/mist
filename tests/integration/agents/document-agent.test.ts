@@ -495,6 +495,187 @@ describe("DocumentAgent", () => {
   /*  Unsupported HTTP methods                                         */
   /* ================================================================ */
 
+  describe("PUT / (replace content)", () => {
+    beforeEach(() => {
+      mockAgentEnv = { DocumentRegistry: {} };
+    });
+
+    function put(body: Record<string, unknown>) {
+      return agent.onRequest(
+        new Request("https://do/", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    }
+
+    async function docText() {
+      const body = (await agent
+        .onRequest(new Request("https://do/?include=text"))
+        .then((r) => r.json())) as { text?: string };
+      return body.text ?? "";
+    }
+
+    it("returns 404 for a document that was never created", async () => {
+      const res = await put({ content: "new" });
+      expect(res.status).toBe(404);
+    });
+
+    it("replaces content, preserves metadata, updates the registry", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-mist-author": "pavel@vio.com",
+            "x-mist-listed": "true",
+          },
+          body: JSON.stringify({ content: "# Old Title\n\nold body" }),
+        }),
+      );
+      const before = (await agent
+        .onRequest(new Request("https://do/"))
+        .then((r) => r.json())) as { createdAt: number };
+      registryCalls.length = 0;
+
+      const res = await put({ content: "# New Title\n\nnew body" });
+      expect(res.status).toBe(200);
+
+      const text = await docText();
+      expect(text).toContain("# New Title");
+      expect(text).not.toContain("old body");
+
+      const after = (await agent
+        .onRequest(new Request("https://do/"))
+        .then((r) => r.json())) as {
+        createdAt: number;
+        author: string | null;
+        title: string | null;
+      };
+      expect(after.createdAt).toBe(before.createdAt);
+      expect(after.author).toBe("pavel@vio.com");
+      expect(after.title).toBe("New Title");
+
+      const upsert = registryCalls.find((c) => c.path === "/upsert");
+      expect(upsert).toBeTruthy();
+      expect(upsert!.body.title).toBe("New Title");
+      expect(upsert!.body.listed).toBe(true);
+    });
+
+    it("clears old comment threads on replace", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "hello",
+            threads: [{ id: "t1", commentText: "done", resolved: true }],
+          }),
+        }),
+      );
+      const res = await put({ content: "fresh" });
+      expect(res.status).toBe(200);
+
+      const client = connectYjsClient();
+      expect(client.doc.getMap("threads").size).toBe(0);
+      cleanup(client);
+    });
+
+    it("rejects with 409 while a comment thread is unresolved", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "hello",
+            threads: [{ id: "t1", commentText: "hm", resolved: false }],
+          }),
+        }),
+      );
+      const res = await put({ content: "fresh" });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error?: string };
+      expect(body.error).toContain("1 unresolved comment");
+      expect(await docText()).toContain("hello");
+    });
+
+    it("rejects with 409 on inline comment marks (suffixed keys)", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "hello world" }),
+        }),
+      );
+      const client = connectYjsClient();
+      const frag = client.doc.getXmlFragment("default");
+      const para = frag.get(0) as Y.XmlElement;
+      const ytext = para.get(0) as Y.XmlText;
+      client.doc.transact(() => {
+        ytext.insert(0, "note", { "criticComment--xyz": {} });
+      });
+      await Promise.resolve();
+
+      const res = await put({ content: "fresh" });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error?: string };
+      expect(body.error).toContain("comment");
+      cleanup(client);
+    });
+
+    it("rejects with 409 on pending suggestions", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "keep {++added++} text" }),
+        }),
+      );
+      const res = await put({ content: "fresh" });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error?: string };
+      expect(body.error).toContain("pending suggestions");
+    });
+
+    it("accepts once threads are resolved", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "hello",
+            threads: [{ id: "t1", commentText: "ok", resolved: true }],
+          }),
+        }),
+      );
+      const res = await put({ content: "fresh" });
+      expect(res.status).toBe(200);
+      expect(await docText()).toContain("fresh");
+    });
+
+    it("pushes the replacement to connected Yjs clients", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "before" }),
+        }),
+      );
+      const client = connectYjsClient();
+      expect(client.doc.getXmlFragment("default").toString()).toContain("before");
+
+      const res = await put({ content: "after" });
+      expect(res.status).toBe(200);
+      await Promise.resolve();
+
+      const rendered = client.doc.getXmlFragment("default").toString();
+      expect(rendered).toContain("after");
+      expect(rendered).not.toContain("before");
+      cleanup(client);
+    });
+  });
+
   describe("DELETE /", () => {
     beforeEach(() => {
       mockAgentEnv = { DocumentRegistry: {} };

@@ -1,6 +1,7 @@
 import { createRequestHandler, RouterContextProvider } from "react-router";
 import { routeAgentRequest } from "agents";
 import { cloudflareContext } from "../app/lib/cloudflare.server";
+import { handleDocUpdate } from "../app/lib/update.server";
 import {
   getSessionEmail,
   isSsoConfigured,
@@ -27,6 +28,12 @@ export default {
     // only ever be called server-side (getAgentByName) — never routed.
     if (url.pathname.startsWith("/agents/token-store")) {
       return new Response("Not found", { status: 404 });
+    }
+
+    // API update: PUT /docs/:id replaces the document. Handled here so
+    // curl gets a plain-text response instead of the rendered page.
+    if (request.method === "PUT" && /^\/docs\/[^/]+$/.test(url.pathname)) {
+      return handleDocUpdate(request, env);
     }
 
     if (url.pathname.startsWith("/agents/") && request.method === "POST") {

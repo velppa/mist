@@ -168,7 +168,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
               onClick={() => fileInputRef.current?.click()}
               className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
             >
-              Upload .md
+              Upload
             </button>
           </div>
           <div className="flex shrink-0 items-stretch border-l border-border">
