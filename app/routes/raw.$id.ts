@@ -1,6 +1,7 @@
 import { data } from "react-router";
 import { getAgentByName } from "agents";
 import { marked } from "marked";
+import { splitFrontmatter } from "~/lib/doc-meta";
 import type { Route } from "./+types/raw.$id";
 import { parseDocId, docFormat } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
@@ -26,7 +27,13 @@ function escapeHtml(text: string): string {
 
 /** Minimal self-contained shell for server-rendered markdown. */
 function markdownPage(title: string, text: string): string {
-  const body = marked.parse(text, { async: false }) as string;
+  // Frontmatter is metadata, not prose — shown as a muted block
+  // instead of letting marked mangle it into setext headings.
+  const { frontmatter, body: mdBody } = splitFrontmatter(text);
+  const fmHtml = frontmatter
+    ? `<pre class="frontmatter">${escapeHtml(frontmatter)}</pre>`
+    : "";
+  const body = fmHtml + (marked.parse(mdBody, { async: false }) as string);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -42,6 +49,8 @@ function markdownPage(title: string, text: string): string {
   code { background: #ececea; padding: .1em .3em; border-radius: 2px; font-size: .9em; }
   pre { background: #ececea; padding: 1em; overflow-x: auto; }
   pre code { background: none; padding: 0; }
+  pre.frontmatter { background: none; border: 1px solid #ddd; color: #777;
+                    font-size: .85em; padding: .6em 1em; }
   blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 1em; color: #555; }
   a { color: inherit; }
   img { max-width: 100%; }

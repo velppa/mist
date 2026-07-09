@@ -3,6 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useDocument } from "~/lib/DocumentContext";
 import { docFormat } from "~/shared/constants";
+import { splitFrontmatter } from "~/lib/doc-meta";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 
@@ -26,9 +27,18 @@ export default function Preview() {
     if (format !== "md") return "";
     // DOMPurify needs a DOM; during SSR render empty and let the client fill in
     if (typeof DOMPurify.sanitize !== "function") return "";
-    const withCritic = renderCriticMarkup(markdown);
+    // Frontmatter is metadata, not prose — shown as a muted block
+    // instead of letting marked mangle it into setext headings.
+    const { frontmatter, body } = splitFrontmatter(markdown);
+    const withCritic = renderCriticMarkup(body);
     const raw = marked.parse(withCritic, { async: false }) as string;
-    return DOMPurify.sanitize(raw);
+    const fmHtml = frontmatter
+      ? `<pre class="frontmatter">${frontmatter
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</pre>`
+      : "";
+    return DOMPurify.sanitize(fmHtml + raw);
   }, [markdown, format]);
 
   if (format === "html") {

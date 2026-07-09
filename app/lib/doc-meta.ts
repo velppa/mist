@@ -22,7 +22,7 @@ export interface DocMeta {
  * must start on the very first line with `---` and end with a matching
  * `---` line.
  */
-function splitFrontmatter(markdown: string): {
+export function splitFrontmatter(markdown: string): {
   frontmatter: string | null;
   body: string;
 } {
