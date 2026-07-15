@@ -41,7 +41,7 @@ function mockDoc(fields: Record<string, unknown>) {
 function expectRenderedHeaders(res: Response) {
   expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
   expect(res.headers.get("Content-Security-Policy")).toBe(
-    "sandbox allow-scripts",
+    "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox",
   );
   expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
 }

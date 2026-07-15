@@ -83,7 +83,7 @@ describe("GET /raw/:id (always verbatim source)", () => {
     const res = (await call("abcd1234")) as Response;
     expect(res.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(res.headers.get("Content-Security-Policy")).toBe(
-      "sandbox allow-scripts",
+      "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox",
     );
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(await res.text()).toBe("<html>hi</html>");

@@ -52,7 +52,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   return new Response(body, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "sandbox allow-scripts",
+      "Content-Security-Policy": "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox",
       "X-Content-Type-Options": "nosniff",
     },
   });

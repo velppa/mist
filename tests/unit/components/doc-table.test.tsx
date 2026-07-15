@@ -62,9 +62,11 @@ describe("DocTable", () => {
         }),
       ),
     );
-    const btn = getByText("listed").closest("button")!;
-    expect(btn.getAttribute("aria-pressed")).toBe("true");
-    btn.click();
+    const box = getByText("Listed")
+      .closest("label")!
+      .querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    box.click();
     expect(calls).toEqual(["4q5dalwz"]);
   });
 
@@ -81,7 +83,9 @@ describe("DocTable", () => {
         }),
       ),
     );
-    const btn = getByText("listed").closest("button") as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
+    const box = getByText("Listed")
+      .closest("label")!
+      .querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(box.disabled).toBe(true);
   });
 });

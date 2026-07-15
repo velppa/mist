@@ -21,6 +21,13 @@ const ASSET_EXTENSIONS: Record<string, string> = {
   "image/svg+xml": "svg",
   "image/avif": "avif",
   "application/json": "json",
+  // Static assets for html/jsx notes (scripts, styles, fonts)
+  "application/javascript": "js",
+  "text/javascript": "js",
+  "text/css": "css",
+  "font/woff2": "woff2",
+  "font/woff": "woff",
+  "font/ttf": "ttf",
 };
 
 /**

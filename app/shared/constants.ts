@@ -1,6 +1,6 @@
 export const APP_NAME = "mist";
 // Bumped on request; the footer links this to the changelog document
-export const APP_VERSION = "1.0.0";
+export const APP_VERSION = "0.5.0";
 
 /** Document formats. Stored in the shared docState map, not the id. */
 export type DocFormat = "md" | "txt" | "html" | "jsx" | "ipynb";

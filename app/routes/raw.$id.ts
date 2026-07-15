@@ -41,7 +41,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   if (format === "html") {
     // Raw html renders as html; the sandbox keeps the note's scripts in
     // an opaque origin, away from the viewer's mist session.
-    headers.set("Content-Security-Policy", "sandbox allow-scripts");
+    headers.set("Content-Security-Policy", "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox");
   }
 
   return new Response(text ?? "", { headers });

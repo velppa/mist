@@ -138,16 +138,20 @@ export default function DocTable({
             {showListed && (
               <td className="whitespace-nowrap py-2 pr-4 font-mono text-sm uppercase tracking-wider text-muted">
                 {onToggleListed ? (
-                  <button
-                    onClick={() => onToggleListed(doc)}
-                    disabled={pendingListedId != null}
-                    aria-pressed={doc.listed}
-                    className={`cursor-pointer uppercase tracking-wider transition-colors hover:text-ink disabled:cursor-default ${
+                  <label
+                    className={`flex cursor-pointer items-center gap-1.5 uppercase tracking-wider transition-colors hover:text-ink ${
                       pendingListedId === doc.id ? "opacity-40" : ""
                     }`}
                   >
-                    {doc.listed ? "listed" : "unlisted"}
-                  </button>
+                    <input
+                      type="checkbox"
+                      checked={doc.listed}
+                      disabled={pendingListedId != null}
+                      onChange={() => onToggleListed(doc)}
+                      className="cursor-pointer accent-current disabled:cursor-default"
+                    />
+                    Listed
+                  </label>
                 ) : doc.listed ? (
                   "listed"
                 ) : (
