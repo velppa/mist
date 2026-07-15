@@ -23,10 +23,18 @@ const SHELL_STYLE = `
   blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 1em; color: #555; }
   a { color: inherit; }
   img { max-width: 100%; }
+  table { border-collapse: collapse; margin: 1em 0; font-size: .95em; }
+  th, td { padding: .4em .8em; text-align: left; vertical-align: top; }
+  th { border-bottom: 2px solid #ccc; }
+  td { border-bottom: 1px solid #e4e4e1; }
+  tbody tr:nth-child(even) { background: #f1f1ee; }
   @media (prefers-color-scheme: dark) {
     body { background: #161615; color: #e8e8e6; }
     code, pre { background: #2a2a28; }
     blockquote { border-color: #444; color: #aaa; }
+    th { border-color: #555; }
+    td { border-color: #333; }
+    tbody tr:nth-child(even) { background: #201f1e; }
   }`;
 
 function shell(title: string, body: string): string {
