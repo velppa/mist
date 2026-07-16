@@ -5,6 +5,9 @@ import { useDocument } from "~/lib/DocumentContext";
 import { splitFrontmatter } from "~/lib/doc-meta";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
+import { headingAnchors } from "~/lib/heading-anchors";
+
+marked.use(headingAnchors());
 
 /** Replace CriticMarkup delimiters with styled HTML spans before markdown rendering */
 function renderCriticMarkup(text: string): string {

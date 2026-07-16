@@ -4,6 +4,8 @@ import { cloudflareContext } from "../app/lib/cloudflare.server";
 import { handleDocUpdate, handleListedUpdate } from "../app/lib/update.server";
 import { handleAssetUpload, handleAssetGet } from "../app/lib/assets.server";
 import {
+  getBearerEmail,
+  getBearerToken,
   getSessionEmail,
   isSsoConfigured,
   requiresLogin,
@@ -70,8 +72,18 @@ export default {
       // Browser pages require a session when SSO is configured.
       const email = await getSessionEmail(request, authEnv);
       if (!email) {
-        const target = `/auth/login?redirect=${encodeURIComponent(url.pathname + url.search)}`;
-        return new Response(null, { status: 302, headers: { Location: target } });
+        // Programmatic reads: on /raw a bearer token stands in for the
+        // session, and a bad token gets a curl-friendly 401 instead of
+        // a login redirect.
+        if (url.pathname.startsWith("/raw/") && getBearerToken(request) !== null) {
+          const bearerEmail = await getBearerEmail(request, authEnv);
+          if (!bearerEmail) {
+            return new Response("invalid API token\n", { status: 401 });
+          }
+        } else {
+          const target = `/auth/login?redirect=${encodeURIComponent(url.pathname + url.search)}`;
+          return new Response(null, { status: 302, headers: { Location: target } });
+        }
       }
     }
 

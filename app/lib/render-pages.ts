@@ -1,5 +1,8 @@
 import { marked } from "marked";
 import { splitFrontmatter } from "~/lib/doc-meta";
+import { headingAnchors } from "~/lib/heading-anchors";
+
+marked.use(headingAnchors());
 
 export function escapeHtml(text: string): string {
   return text
@@ -14,6 +17,9 @@ const SHELL_STYLE = `
          margin: 2rem auto; padding: 0 1rem; line-height: 1.7;
          background: #fafaf8; color: #1a1a1a; }
   h1, h2, h3, h4 { line-height: 1.3; }
+  .heading-anchor { opacity: 0; text-decoration: none; color: #999; font-weight: 400; }
+  :is(h1,h2,h3,h4,h5,h6):hover .heading-anchor,
+  .heading-anchor:focus { opacity: 1; }
   code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   code { background: #ececea; padding: .1em .3em; border-radius: 2px; font-size: .9em; }
   pre { background: #ececea; padding: 1em; overflow-x: auto; }

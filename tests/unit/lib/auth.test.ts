@@ -7,6 +7,7 @@ import {
   createSessionCookie,
   exchangeCode,
   generatePkce,
+  getBearerEmail,
   getBearerToken,
   getCookie,
   getSessionEmail,
@@ -219,6 +220,36 @@ describe("authenticateNewRequest", () => {
       MIST_API_TOKENS: '{"tok":"alice@vio.com"}',
     });
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("getBearerEmail", () => {
+  it("resolves a configured token to its email", async () => {
+    const req = new Request("https://x/raw/abc", {
+      headers: { Authorization: "Bearer tok" },
+    });
+    const email = await getBearerEmail(req, {
+      MIST_API_TOKENS: '{"tok":"alice@vio.com"}',
+    });
+    expect(email).toBe("alice@vio.com");
+  });
+
+  it("returns null without an Authorization header", async () => {
+    const req = new Request("https://x/raw/abc");
+    const email = await getBearerEmail(req, {
+      MIST_API_TOKENS: '{"tok":"alice@vio.com"}',
+    });
+    expect(email).toBeNull();
+  });
+
+  it("returns null for an unknown token when no store is bound", async () => {
+    const req = new Request("https://x/raw/abc", {
+      headers: { Authorization: "Bearer wrong" },
+    });
+    const email = await getBearerEmail(req, {
+      MIST_API_TOKENS: '{"tok":"alice@vio.com"}',
+    });
+    expect(email).toBeNull();
   });
 });
 

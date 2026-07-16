@@ -262,6 +262,23 @@ async function lookupStoreToken(
 }
 
 /**
+ * Email for the request's bearer token, or null when no token is
+ * presented or it doesn't resolve. Checks env-configured tokens first,
+ * then the token store.
+ */
+export async function getBearerEmail(
+  request: Request,
+  env: AuthEnv,
+): Promise<string | null> {
+  const bearer = getBearerToken(request);
+  if (bearer === null) return null;
+  return (
+    parseApiTokens(env.MIST_API_TOKENS).get(bearer) ??
+    (await lookupStoreToken(bearer, env))
+  );
+}
+
+/**
  * Decide whether a document-creation request may proceed and which email
  * to record as the author. Order of preference: bearer token, browser
  * session, open access (when no auth is configured at all).

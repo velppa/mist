@@ -39,10 +39,10 @@ export default function MobilePanel({ className }: { className?: string }) {
 
   return (
     <div
-      className={`fixed bottom-0 left-0 right-0 bg-paper ${className ?? ""}`}
+      className={`shrink-0 border-t border-border bg-paper ${className ?? ""}`}
       style={collapsed ? undefined : { height: "33vh" }}
     >
-      <div className={`flex gap-2 px-3 pt-3 ${collapsed ? "pb-8" : "pb-2"}`}>
+      <div className={`flex gap-2 px-3 pt-3 ${collapsed ? "pb-3" : "pb-2"}`}>
         {tabs.map((tab) => (
           <button
             key={tab.id}

@@ -2,7 +2,7 @@
 name: mist-publisher
 description: Publish a document to the mist instance and return its URL. Use when the user asks to publish, share, or upload "this doc", "the summary", a markdown/txt/html file, or conversation output to mist.
 compatibility: Requires curl; token bootstrap needs the claude-in-chrome MCP tools.
-version: v1.0.0
+version: v1.1.0
 ---
 
 # mist-publisher
@@ -73,6 +73,22 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: image/png" \
   the link automatically.
 
 ## 4. Update
+
+**PUT replaces the whole note — always download the current version first**
+and apply your changes on top of it. The user may have edited the note in the
+mist editor since you last uploaded; PUTting a stale local copy silently wipes
+those edits. Never PUT a file you generated earlier in the session without
+re-fetching.
+
+Reads are NOT token-authenticated: GET `/raw/<id>` (and GET `/docs/<id>`)
+require a OneLogin browser session and redirect (302) when hit with curl +
+bearer token. To download the current version:
+
+1. Fetch `$MIST_HOST/raw/<id>` via the claude-in-chrome tools (user's browser
+   has the session), or
+2. Ask the user to paste/save the current content.
+
+Diff it against your local copy; merge any manual edits before uploading.
 
 Replace a note's content with PUT (the id may carry a title alias):
 

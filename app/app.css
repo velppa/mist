@@ -279,6 +279,19 @@ body {
 .preview h2 { font-size: 1.5em; }
 .preview h3 { font-size: 1.25em; }
 
+/* Heading permalink: invisible until its heading is hovered */
+.preview .heading-anchor {
+  opacity: 0;
+  color: var(--color-muted);
+  text-decoration: none;
+  font-weight: 400;
+}
+
+.preview :is(h1, h2, h3, h4, h5, h6):hover .heading-anchor,
+.preview .heading-anchor:focus {
+  opacity: 1;
+}
+
 .preview p {
   margin: 0.75em 0;
 }

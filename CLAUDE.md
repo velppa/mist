@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when
+working with code in this repository.
 
 ## Start of Session
 
@@ -13,7 +14,11 @@ Also check `plans/` for any active plan.
 
 ## Project Overview
 
-MIST is a collaborative markdown editor — a cross between GitHub Gist and Google Docs. Users can quickly share and do multiplayer editing on markdown documents in real-time. Everything is public by URL (no auth yet). Documents persist live with no save button.
+MIST is a collaborative markdown editor — a cross between GitHub Gist
+and Google Docs. Users can quickly share and do multiplayer editing on
+markdown documents in real-time. Authorisation uses OneLogin,
+`/assets` are is public by unguessable URL (timestamped by
+milliseconds). Documents persist live with no save button.
 
 ## Tech Stack
 
