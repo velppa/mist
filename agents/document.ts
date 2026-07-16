@@ -18,6 +18,18 @@ import {
   readListedFlag,
   migrateLegacyListedKey,
 } from "../app/shared/doc-state";
+import {
+  MSG_CHUNK,
+  ChunkAssembler,
+  toWireFrames,
+} from "../app/shared/ws-chunks";
+
+/** Send a protocol message, split into frames when oversized. */
+function sendChunked(connection: Connection, message: Uint8Array) {
+  for (const frame of toWireFrames(message)) {
+    connection.send(frame);
+  }
+}
 
 /**
  * How long to wait after the last Yjs update before pushing fresh
@@ -111,6 +123,8 @@ class DocumentAgent extends Agent {
   private registrySyncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastKnownListed = false;
   private lastKnownFormat: DocFormat = "md";
+  /** Per-connection reassembly of oversized (chunked) client messages. */
+  private assemblers = new Map<string, ChunkAssembler>();
 
   /**
    * Durable Object SQLite caps a single value at 2 MB, so the Yjs state
@@ -219,7 +233,7 @@ class DocumentAgent extends Agent {
         const message = encoding.toUint8Array(encoder);
         for (const conn of this.getConnections()) {
           try {
-            conn.send(message);
+            sendChunked(conn, message);
           } catch {
             // Connection already gone
           }
@@ -353,7 +367,7 @@ class DocumentAgent extends Agent {
     const stateEncoder = encoding.createEncoder();
     encoding.writeVarUint(stateEncoder, MSG_SYNC);
     syncProtocol.writeSyncStep2(stateEncoder, doc);
-    connection.send(encoding.toUint8Array(stateEncoder));
+    sendChunked(connection, encoding.toUint8Array(stateEncoder));
 
     // Send current awareness states to the new client
     const awarenessStates = awareness.getStates();
@@ -383,10 +397,29 @@ class DocumentAgent extends Agent {
             (message as Uint8Array).byteOffset,
             (message as Uint8Array).byteLength,
           );
+    this.processClientMessage(connection, data, doc, awareness);
+  }
+
+  private processClientMessage(
+    connection: Connection,
+    data: Uint8Array,
+    doc: Y.Doc,
+    awareness: awarenessProtocol.Awareness,
+  ) {
     const decoder = decoding.createDecoder(data);
     const msgType = decoding.readVarUint(decoder);
 
     switch (msgType) {
+      case MSG_CHUNK: {
+        let assembler = this.assemblers.get(connection.id);
+        if (!assembler) {
+          assembler = new ChunkAssembler();
+          this.assemblers.set(connection.id, assembler);
+        }
+        const whole = assembler.push(decoder);
+        if (whole) this.processClientMessage(connection, whole, doc, awareness);
+        break;
+      }
       case MSG_SYNC: {
         const encoder = encoding.createEncoder();
         encoding.writeVarUint(encoder, MSG_SYNC);
@@ -394,11 +427,11 @@ class DocumentAgent extends Agent {
 
         // If there's a response (e.g. SyncStep2 reply), send it back
         if (encoding.length(encoder) > 1) {
-          connection.send(encoding.toUint8Array(encoder));
+          sendChunked(connection, encoding.toUint8Array(encoder));
         }
 
-        // Broadcast the raw message to all other clients
-        this.broadcastBinary(message, connection.id);
+        // Broadcast the whole message to all other clients
+        this.broadcastBinary(data, connection.id);
         break;
       }
       case MSG_AWARENESS: {
@@ -406,7 +439,7 @@ class DocumentAgent extends Agent {
         awarenessProtocol.applyAwarenessUpdate(awareness, update, connection);
 
         // Broadcast awareness to all other clients
-        this.broadcastBinary(message, connection.id);
+        this.broadcastBinary(data, connection.id);
         break;
       }
     }
@@ -418,6 +451,7 @@ class DocumentAgent extends Agent {
     _reason: string,
     _wasClean: boolean,
   ) {
+    this.assemblers.delete(connection.id);
     if (this.awareness) {
       // Remove this client's awareness state
       awarenessProtocol.removeAwarenessStates(
@@ -768,20 +802,15 @@ class DocumentAgent extends Agent {
     return new Response("Not found", { status: 404 });
   }
 
-  private broadcastBinary(message: WSMessage, excludeId: string) {
+  private broadcastBinary(message: Uint8Array, excludeId: string) {
     // Make a clean copy to avoid ArrayBufferView offset issues
-    const bytes =
-      message instanceof ArrayBuffer
-        ? new Uint8Array(message)
-        : new Uint8Array(
-            (message as Uint8Array).buffer,
-            (message as Uint8Array).byteOffset,
-            (message as Uint8Array).byteLength,
-          );
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const buf = message.buffer.slice(
+      message.byteOffset,
+      message.byteOffset + message.byteLength,
+    );
     for (const conn of this.getConnections()) {
       if (conn.id !== excludeId) {
-        conn.send(buf);
+        sendChunked(conn, new Uint8Array(buf));
       }
     }
   }

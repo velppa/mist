@@ -9,14 +9,17 @@
  * Pure string builder — shared by the client preview (srcdoc) and the
  * /raw route (worker), so the two renderings can never drift.
  */
-export function buildIpynbRunnerHtml(src: string): string {
+import { escapeHtml } from "~/lib/render-pages";
+
+export function buildIpynbRunnerHtml(src: string, title?: string): string {
   // </script> inside the embedded source must not terminate the tag
   const embedded = JSON.stringify(src).replace(/<\/script/gi, "<\\/script");
+  const titleTag = title ? `\n<title>${escapeHtml(title)}</title>` : "";
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">${titleTag}
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 84ch;
@@ -130,7 +133,11 @@ try {
     el("pre", "cell", root).textContent = srcText;
   });
 } catch (e) {
-  fail(e);
+  // Surface where the notebook JSON went wrong, not just the stack
+  fail(String((e && e.stack) || e) +
+    "\\n\\nSRC length: " + SRC.length +
+    "\\nSRC head: " + JSON.stringify(SRC.slice(0, 300)) +
+    "\\nSRC tail: " + JSON.stringify(SRC.slice(-150)));
 }
 </script>
 </body>

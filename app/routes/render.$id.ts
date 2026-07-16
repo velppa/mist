@@ -40,7 +40,7 @@ export async function loader({ params, context }: Route.LoaderArgs) {
       : format === "jsx"
         ? buildJsxRunnerHtml(source)
         : format === "ipynb"
-          ? buildIpynbRunnerHtml(source)
+          ? buildIpynbRunnerHtml(source, title ?? id)
           : format === "txt"
             ? textPage(title ?? id, source)
             : markdownPage(title ?? id, source);

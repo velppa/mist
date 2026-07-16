@@ -6,6 +6,7 @@ import { splitFrontmatter } from "~/lib/doc-meta";
 import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 import { headingAnchors } from "~/lib/heading-anchors";
+import { stripCriticMarkup } from "~/lib/critic-parser";
 
 marked.use(headingAnchors());
 
@@ -49,7 +50,7 @@ export default function Preview() {
     // note's scripts in an opaque origin, away from the viewer's cookies.
     return (
       <iframe
-        srcDoc={markdown}
+        srcDoc={stripCriticMarkup(markdown)}
         sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
         className="h-full w-full border-0"
         title="preview"
@@ -58,10 +59,16 @@ export default function Preview() {
   }
 
   if (format === "jsx" || format === "ipynb") {
+    // Before the first Yjs sync the text is empty; an empty notebook
+    // would render as a JSON parse error, so show a placeholder.
+    if (!deferredSource.trim()) {
+      return <p className="p-6 text-muted">Loading document…</p>;
+    }
+    const source = stripCriticMarkup(deferredSource);
     const srcDoc =
       format === "jsx"
-        ? buildJsxRunnerHtml(deferredSource)
-        : buildIpynbRunnerHtml(deferredSource);
+        ? buildJsxRunnerHtml(source)
+        : buildIpynbRunnerHtml(source);
     return (
       <iframe
         srcDoc={srcDoc}

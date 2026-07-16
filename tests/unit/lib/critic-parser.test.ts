@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCriticMarkupToContent } from "~/lib/critic-parser";
+import { parseCriticMarkupToContent, stripCriticMarkup } from "~/lib/critic-parser";
 
 describe("parseCriticMarkupToContent", () => {
   it("parses addition", () => {
@@ -95,5 +95,28 @@ describe("parseCriticMarkupToContent", () => {
     expect(result.marks).toHaveLength(2);
     expect(result.marks[0].type).toBe("criticHighlight");
     expect(result.marks[1].type).toBe("criticComment");
+  });
+});
+
+describe("stripCriticMarkup", () => {
+  it("removes delimiters, keeps marked text, drops comment annotations", () => {
+    expect(
+      stripCriticMarkup('{"a": {++1++}, "b": "x{==hl==}y", {--"c": 2--}}'),
+    ).toBe('{"a": 1, "b": "xhly", "c": 2}');
+  });
+
+  it("drops a comment annotation appended after content", () => {
+    expect(stripCriticMarkup('{"nbformat": 4}\n{>>@pavel it works!<<}')).toBe(
+      '{"nbformat": 4}\n',
+    );
+  });
+
+  it("drops multiline comment annotations", () => {
+    expect(stripCriticMarkup('a{>>line1\nline2<<}b')).toBe("ab");
+  });
+
+  it("leaves unmarked text alone", () => {
+    const nb = '{"cells": [{"source": ["set like {x: 1}"]}]}';
+    expect(stripCriticMarkup(nb)).toBe(nb);
   });
 });

@@ -15,6 +15,12 @@ describe("buildIpynbRunnerHtml", () => {
     expect(html).toContain("<\\/script><script>alert(1)");
   });
 
+  it("emits an escaped <title> when given one, none otherwise", () => {
+    const withTitle = buildIpynbRunnerHtml("{}", "Airbnb <Inventory> Analysis");
+    expect(withTitle).toContain("<title>Airbnb &lt;Inventory&gt; Analysis</title>");
+    expect(buildIpynbRunnerHtml("{}")).not.toContain("<title>");
+  });
+
   it("renderer handles markdown, code, image and html outputs", () => {
     // The renderer runs in the browser; here assert the script carries
     // the relevant branches so drift is caught.

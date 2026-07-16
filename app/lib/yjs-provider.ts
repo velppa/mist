@@ -4,12 +4,14 @@ import * as syncProtocol from "y-protocols/sync";
 import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import { MSG_SYNC, MSG_AWARENESS } from "~/shared/constants";
+import { MSG_CHUNK, ChunkAssembler, toWireFrames } from "~/shared/ws-chunks";
 
 export class YjsProvider {
   private doc: Y.Doc;
   private awareness: awarenessProtocol.Awareness;
   private ws: WebSocket;
   private synced = false;
+  private assembler = new ChunkAssembler();
   private onSyncedChange: ((synced: boolean) => void) | null = null;
 
   private boundOnMessage: (event: MessageEvent) => void;
@@ -69,10 +71,19 @@ export class YjsProvider {
       event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data;
     if (!(data instanceof Uint8Array)) return;
 
+    this.processMessage(data);
+  }
+
+  private processMessage(data: Uint8Array): void {
     const decoder = decoding.createDecoder(data);
     const msgType = decoding.readVarUint(decoder);
 
     switch (msgType) {
+      case MSG_CHUNK: {
+        const whole = this.assembler.push(decoder);
+        if (whole) this.processMessage(whole);
+        break;
+      }
       case MSG_SYNC: {
         const encoder = encoding.createEncoder();
         encoding.writeVarUint(encoder, MSG_SYNC);
@@ -129,7 +140,9 @@ export class YjsProvider {
 
   private send(data: Uint8Array): void {
     if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(data);
+      for (const frame of toWireFrames(data)) {
+        this.ws.send(frame);
+      }
     }
   }
 

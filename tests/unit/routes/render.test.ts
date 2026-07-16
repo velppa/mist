@@ -60,7 +60,7 @@ describe("GET /render/:id", () => {
     const res = (await call("abcd1234")) as Response;
     expectRenderedHeaders(res);
     const body = await res.text();
-    expect(body).toContain("<h1>Heading</h1>");
+    expect(body).toContain('<h1 id="heading">Heading ');
     expect(body).toContain("<title>Heading</title>");
     expect(body).toContain('class="frontmatter"');
     expect(body).toContain("author: alice");

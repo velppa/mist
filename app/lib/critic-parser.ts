@@ -8,6 +8,20 @@ export interface ParsedMark {
 }
 
 /**
+ * Reduce CriticMarkup to the underlying document text: delimiters drop,
+ * marked text stays, and comments — annotations, not content — vanish
+ * entirely. Source-format previews (html/jsx/ipynb) need this so review
+ * markup never leaks into code that gets parsed or executed.
+ */
+export function stripCriticMarkup(text: string): string {
+  return text
+    .replace(/\{--(.*?)--\}/gs, "$1")
+    .replace(/\{\+\+(.*?)\+\+\}/gs, "$1")
+    .replace(/\{>>.*?<<\}/gs, "")
+    .replace(/\{==(.*?)==\}/gs, "$1");
+}
+
+/**
  * Parse CriticMarkup text into clean text + mark ranges.
  * Used by the agent's POST handler to populate Yjs docs with marks.
  *
