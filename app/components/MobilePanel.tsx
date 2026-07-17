@@ -39,10 +39,10 @@ export default function MobilePanel({ className }: { className?: string }) {
 
   return (
     <div
-      className={`shrink-0 border-t border-border bg-paper ${className ?? ""}`}
-      style={collapsed ? undefined : { height: "33vh" }}
+      className={`flex shrink-0 flex-col border-t border-border bg-paper ${className ?? ""}`}
+      style={collapsed ? undefined : { maxHeight: "33vh" }}
     >
-      <div className={`flex gap-2 px-3 pt-3 ${collapsed ? "pb-3" : "pb-2"}`}>
+      <div className={`flex shrink-0 gap-2 px-3 pt-3 ${collapsed ? "pb-3" : "pb-2"}`}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -56,10 +56,7 @@ export default function MobilePanel({ className }: { className?: string }) {
         ))}
       </div>
       {!collapsed && (
-        <div
-          className="overflow-y-auto"
-          style={{ height: "calc(33vh - 48px)" }}
-        >
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {activeTab === "editing" && (
             <>
               <OnboardingBanner />
