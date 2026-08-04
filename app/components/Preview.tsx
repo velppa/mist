@@ -1,4 +1,4 @@
-import { useMemo, useDeferredValue } from "react";
+import { useMemo, useDeferredValue, useRef } from "react";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { useDocument } from "~/lib/DocumentContext";
@@ -7,7 +7,8 @@ import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 import { headingAnchors } from "~/lib/heading-anchors";
 import { stripCriticMarkup } from "~/lib/critic-parser";
-import HtmlPreview from "~/components/HtmlPreview";
+import { useInlineAnnotator } from "~/lib/useInlineAnnotator";
+import HtmlPreview, { SandboxedPreview } from "~/components/HtmlPreview";
 
 marked.use(headingAnchors());
 
@@ -18,6 +19,30 @@ function renderCriticMarkup(text: string): string {
     .replace(/\{\+\+(.+?)\+\+\}/g, '<span class="cm-addition">$1</span>')
     .replace(/\{>>(.+?)<<\}/g, '')
     .replace(/\{==(.+?)==\}/g, '<span class="cm-highlight">$1</span>');
+}
+
+/** Rendered markdown with anchored comments over the same-origin DOM. */
+function MarkdownPreview({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useInlineAnnotator(ref, html);
+  return (
+    <div
+      ref={ref}
+      className="preview"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+/** Plain text with anchored comments over the same-origin DOM. */
+function TextPreview({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useInlineAnnotator(ref, text);
+  return (
+    <div ref={ref}>
+      <pre className="preview whitespace-pre-wrap font-mono">{text}</pre>
+    </div>
+  );
 }
 
 export default function Preview() {
@@ -63,26 +88,12 @@ export default function Preview() {
       format === "jsx"
         ? buildJsxRunnerHtml(source)
         : buildIpynbRunnerHtml(source);
-    return (
-      <iframe
-        srcDoc={srcDoc}
-        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-        className="h-full w-full border-0"
-        title="preview"
-      />
-    );
+    return <SandboxedPreview srcDoc={srcDoc} />;
   }
 
   if (format === "txt") {
-    return (
-      <pre className="preview whitespace-pre-wrap font-mono">{markdown}</pre>
-    );
+    return <TextPreview text={markdown} />;
   }
 
-  return (
-    <div
-      className="preview"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
+  return <MarkdownPreview html={html} />;
 }

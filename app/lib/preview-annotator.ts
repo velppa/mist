@@ -182,12 +182,32 @@ export interface AnchorMessage {
   posEnd: number;
 }
 
+export interface AnnotatorCallbacks {
+  onSelection(selection: ThreadAnchor | null): void;
+  onCommentRequest(selection: ThreadAnchor): void;
+  onHighlightClick(threadId: string): void;
+}
+
+export interface AnnotatorHandle {
+  paint(anchors: AnchorMessage[], activeThreadId: string | null): void;
+  setActive(activeThreadId: string | null): void;
+  destroy(): void;
+}
+
 /**
- * The in-iframe side: builds a text index over the rendered document, captures
- * selections as quote selectors, paints highlight spans for resolved anchors,
- * and relays clicks — all over postMessage to the (cross-origin) parent.
+ * The annotation engine over a rendered text layer: builds a canonical text
+ * index under `root`, captures selections as quote selectors (with a floating
+ * Comment button), paints highlight spans for resolved anchors, and reports
+ * highlight clicks. Works against any document — the same-origin preview DOM
+ * directly, or a sandboxed iframe when serialized into it — so it must stay
+ * free of imports and module-level references (Function.prototype.toString).
  */
-export function installMistAnnotator(kit: AnchorKit): void {
+export function createDomAnnotator(
+  kit: AnchorKit,
+  win: Window,
+  root: HTMLElement,
+  callbacks: AnnotatorCallbacks,
+): AnnotatorHandle {
   interface CharRef {
     node: Text;
     offset: number;
@@ -198,6 +218,8 @@ export function installMistAnnotator(kit: AnchorKit): void {
     nodeStart: Map<Text, number>;
   }
 
+  const doc = root.ownerDocument;
+
   const BLOCK_TAGS = new Set([
     "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DD", "DETAILS", "DIV", "DL",
     "DT", "FIELDSET", "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2",
@@ -205,31 +227,30 @@ export function installMistAnnotator(kit: AnchorKit): void {
     "PRE", "SECTION", "TABLE", "TD", "TH", "TR", "UL", "BR",
   ]);
 
-  let index: TextIndex | null = null;
-  let currentSelection: ReturnType<typeof captureSelection> = null;
   let lastAnchors: AnchorMessage[] = [];
   let lastActiveId: string | null = null;
+  let currentSelection: (ThreadAnchor & { rectBottom: number; rectRight: number }) | null = null;
 
-  const style = document.createElement("style");
-  style.setAttribute("data-mist-annotator", "");
-  style.textContent = [
-    ".mist-highlight { background: rgba(255, 137, 106, 0.25); border-bottom: 2px solid rgba(255, 137, 106, 0.7); cursor: pointer; border-radius: 2px; }",
-    ".mist-highlight.active { background: rgba(255, 137, 106, 0.5); }",
-    "#mist-comment-btn { position: absolute; z-index: 2147483647; padding: 4px 10px; font: 12px/1.6 system-ui, sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: #fff; background: #1a1a1a; border: none; border-radius: 3px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }",
-    "#mist-comment-btn:hover { background: #444; }",
-  ].join("\n");
-  (document.head || document.documentElement).appendChild(style);
+  if (!doc.getElementById("mist-annotator-style")) {
+    const style = doc.createElement("style");
+    style.id = "mist-annotator-style";
+    style.setAttribute("data-mist-annotator", "");
+    style.textContent = [
+      ".mist-highlight { background: rgba(255, 137, 106, 0.25); border-bottom: 2px solid rgba(255, 137, 106, 0.7); cursor: pointer; border-radius: 2px; }",
+      ".mist-highlight.active { background: rgba(255, 137, 106, 0.5); }",
+      ".mist-comment-btn { position: absolute; z-index: 2147483647; padding: 4px 10px; font: 12px/1.6 system-ui, sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: #fff; background: #1a1a1a; border: none; border-radius: 3px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }",
+      ".mist-comment-btn:hover { background: #444; }",
+    ].join("\n");
+    (doc.head || doc.documentElement).appendChild(style);
+  }
 
-  const button = document.createElement("button");
-  button.id = "mist-comment-btn";
+  const button = doc.createElement("button");
+  button.className = "mist-comment-btn";
   button.type = "button";
   button.textContent = "Comment";
   button.style.display = "none";
   button.setAttribute("data-mist-annotator", "");
-
-  function post(message: Record<string, unknown>): void {
-    window.parent.postMessage(message, "*");
-  }
+  doc.body.appendChild(button);
 
   function isExcludedText(node: Text): boolean {
     let current = node.parentElement;
@@ -250,14 +271,15 @@ export function installMistAnnotator(kit: AnchorKit): void {
     return null;
   }
 
-  // The canonical text layer: document order, script/style/annotator UI
-  // excluded, a synthetic space at block boundaries.
+  // The canonical text layer: document order under `root`, script/style and
+  // annotator UI excluded, a synthetic space at block boundaries. Rebuilt
+  // before every use — the rendered DOM may change at any time.
   function buildIndex(): TextIndex {
     const chars: CharRef[] = [];
     const nodeStart = new Map<Text, number>();
     let text = "";
     let lastBlock: Element | null = null;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: (candidate) =>
         isExcludedText(candidate as Text) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
     });
@@ -277,8 +299,7 @@ export function installMistAnnotator(kit: AnchorKit): void {
       }
       node = walker.nextNode() as Text | null;
     }
-    index = { text, chars, nodeStart };
-    return index;
+    return { text, chars, nodeStart };
   }
 
   function indexOfNode(idx: TextIndex, container: Node, offset: number): number | null {
@@ -303,10 +324,13 @@ export function installMistAnnotator(kit: AnchorKit): void {
   }
 
   function captureSelection(): (ThreadAnchor & { rectBottom: number; rectRight: number }) | null {
-    const selection = document.getSelection();
+    const selection = doc.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
-    const idx = index ?? buildIndex();
     const range = selection.getRangeAt(0);
+    // Only selections inside the annotated layer count — the surrounding
+    // page (sidebar, header) has its own selection life.
+    if (!root.contains(range.commonAncestorContainer)) return null;
+    const idx = buildIndex();
     const posStart = indexOfNode(idx, range.startContainer, range.startOffset);
     const posEnd = indexOfNode(idx, range.endContainer, range.endOffset);
     if (posStart === null || posEnd === null || posEnd <= posStart) return null;
@@ -316,13 +340,13 @@ export function installMistAnnotator(kit: AnchorKit): void {
     const last = rects[rects.length - 1];
     return {
       ...selectors,
-      rectBottom: last ? last.bottom + window.scrollY : window.scrollY,
-      rectRight: last ? last.right + window.scrollX : window.scrollX,
+      rectBottom: last ? last.bottom + win.scrollY : win.scrollY,
+      rectRight: last ? last.right + win.scrollX : win.scrollX,
     };
   }
 
   function clearHighlights(): void {
-    const spans = document.querySelectorAll("span.mist-highlight[data-thread-id]");
+    const spans = root.querySelectorAll("span.mist-highlight[data-thread-id]");
     for (let i = 0; i < spans.length; i += 1) {
       const el = spans[i];
       const parent = el.parentNode;
@@ -330,14 +354,14 @@ export function installMistAnnotator(kit: AnchorKit): void {
       while (el.firstChild) parent.insertBefore(el.firstChild, el);
       parent.removeChild(el);
     }
-    document.body.normalize();
+    root.normalize();
   }
 
   function rangeFor(idx: TextIndex, start: number, end: number): Range | null {
     const startRef = idx.chars[start];
     const endRef = idx.chars[end - 1];
     if (!startRef || !endRef) return null;
-    const range = document.createRange();
+    const range = doc.createRange();
     range.setStart(startRef.node, startRef.offset);
     range.setEnd(endRef.node, endRef.offset + 1);
     return range;
@@ -347,9 +371,9 @@ export function installMistAnnotator(kit: AnchorKit): void {
   // splitting boundary nodes so only matched characters are wrapped.
   function wrapRange(range: Range, threadId: string, active: boolean): void {
     const container = range.commonAncestorContainer;
-    const root =
+    const wrapRoot =
       container.nodeType === Node.TEXT_NODE ? (container.parentNode ?? container) : container;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const walker = doc.createTreeWalker(wrapRoot, NodeFilter.SHOW_TEXT);
     const nodes: Text[] = [];
     let node = walker.nextNode() as Text | null;
     while (node) {
@@ -363,7 +387,7 @@ export function installMistAnnotator(kit: AnchorKit): void {
       let piece = target;
       if (start > 0) piece = piece.splitText(start);
       if (end - start < piece.length) piece.splitText(end - start);
-      const span = document.createElement("span");
+      const span = doc.createElement("span");
       span.className = "mist-highlight" + (active ? " active" : "");
       span.setAttribute("data-thread-id", threadId);
       piece.parentNode?.insertBefore(span, piece);
@@ -389,12 +413,11 @@ export function installMistAnnotator(kit: AnchorKit): void {
     for (const item of planned) {
       wrapRange(item.range, item.threadId, item.threadId === activeId);
     }
-    buildIndex();
   }
 
   function setActive(activeId: string | null): void {
     lastActiveId = activeId;
-    const spans = document.querySelectorAll(".mist-highlight[data-thread-id]");
+    const spans = root.querySelectorAll(".mist-highlight[data-thread-id]");
     let scrolled = false;
     for (let i = 0; i < spans.length; i += 1) {
       const el = spans[i];
@@ -420,76 +443,109 @@ export function installMistAnnotator(kit: AnchorKit): void {
     } else {
       hideButton();
     }
-    post({
-      type: "mist-selection",
-      selection: currentSelection && {
+    callbacks.onSelection(
+      currentSelection && {
         quote: currentSelection.quote,
         prefix: currentSelection.prefix,
         suffix: currentSelection.suffix,
         posStart: currentSelection.posStart,
         posEnd: currentSelection.posEnd,
       },
-    });
+    );
   }
 
-  button.addEventListener("mousedown", (event) => {
+  const onButtonDown = (event: MouseEvent) => {
     // Before mouseup collapses the selection
     event.preventDefault();
     event.stopPropagation();
     if (!currentSelection) return;
-    post({
-      type: "mist-comment-request",
-      selection: {
-        quote: currentSelection.quote,
-        prefix: currentSelection.prefix,
-        suffix: currentSelection.suffix,
-        posStart: currentSelection.posStart,
-        posEnd: currentSelection.posEnd,
-      },
+    callbacks.onCommentRequest({
+      quote: currentSelection.quote,
+      prefix: currentSelection.prefix,
+      suffix: currentSelection.suffix,
+      posStart: currentSelection.posStart,
+      posEnd: currentSelection.posEnd,
     });
     hideButton();
-    document.getSelection()?.removeAllRanges();
-  });
+    doc.getSelection()?.removeAllRanges();
+  };
+  button.addEventListener("mousedown", onButtonDown);
 
   let selectionTimer: ReturnType<typeof setTimeout> | null = null;
-  document.addEventListener("selectionchange", () => {
+  const onSelectionChange = () => {
     if (selectionTimer) clearTimeout(selectionTimer);
     selectionTimer = setTimeout(onSelectionSettled, 200);
-  });
+  };
+  doc.addEventListener("selectionchange", onSelectionChange);
 
-  document.addEventListener("click", (event) => {
+  const onClick = (event: MouseEvent) => {
     const target = event.target as Element | null;
     const highlight = target && typeof target.closest === "function"
       ? target.closest(".mist-highlight[data-thread-id]")
       : null;
     if (highlight) {
-      post({ type: "mist-highlight-click", threadId: highlight.getAttribute("data-thread-id") });
+      const threadId = highlight.getAttribute("data-thread-id");
+      if (threadId) callbacks.onHighlightClick(threadId);
     }
-  });
+  };
+  doc.addEventListener("click", onClick);
 
-  window.addEventListener("message", (event: MessageEvent) => {
-    // Only the embedding page may drive painting
-    if (event.source !== window.parent) return;
-    const data = event.data as { type?: string } | null;
-    if (!data || typeof data !== "object") return;
-    if (data.type === "mist-anchors") {
-      const msg = data as { anchors?: AnchorMessage[]; activeThreadId?: string | null };
-      paint(Array.isArray(msg.anchors) ? msg.anchors : [], msg.activeThreadId ?? null);
-    } else if (data.type === "mist-active") {
-      const msg = data as { activeThreadId?: string | null };
-      setActive(msg.activeThreadId ?? null);
-    }
-  });
+  // Late layout (images, fonts) can reflow after the first paint; repaint on
+  // load so highlight geometry stays honest for click targets.
+  const onLoad = () => {
+    if (lastAnchors.length > 0) paint(lastAnchors, lastActiveId);
+  };
+  win.addEventListener("load", onLoad);
+
+  return {
+    paint,
+    setActive,
+    destroy() {
+      if (selectionTimer) clearTimeout(selectionTimer);
+      doc.removeEventListener("selectionchange", onSelectionChange);
+      doc.removeEventListener("click", onClick);
+      win.removeEventListener("load", onLoad);
+      button.removeEventListener("mousedown", onButtonDown);
+      button.remove();
+      clearHighlights();
+    },
+  };
+}
+
+/**
+ * The in-iframe side: runs the engine over the whole document and relays it
+ * to the (cross-origin) parent over postMessage.
+ */
+export function installMistAnnotator(
+  kit: AnchorKit,
+  makeAnnotator: typeof createDomAnnotator,
+): void {
+  function post(message: Record<string, unknown>): void {
+    window.parent.postMessage(message, "*");
+  }
 
   function start(): void {
-    document.body.appendChild(button);
-    buildIndex();
-    post({ type: "mist-annotator-ready" });
-    // Late layout (images, fonts) shifts nothing text-wise, but a repaint
-    // after load keeps highlight geometry honest for click targets.
-    window.addEventListener("load", () => {
-      if (lastAnchors.length > 0) paint(lastAnchors, lastActiveId);
+    const engine = makeAnnotator(kit, window, document.body, {
+      onSelection: (selection) => post({ type: "mist-selection", selection }),
+      onCommentRequest: (selection) => post({ type: "mist-comment-request", selection }),
+      onHighlightClick: (threadId) => post({ type: "mist-highlight-click", threadId }),
     });
+
+    window.addEventListener("message", (event: MessageEvent) => {
+      // Only the embedding page may drive painting
+      if (event.source !== window.parent) return;
+      const data = event.data as { type?: string } | null;
+      if (!data || typeof data !== "object") return;
+      if (data.type === "mist-anchors") {
+        const msg = data as { anchors?: AnchorMessage[]; activeThreadId?: string | null };
+        engine.paint(Array.isArray(msg.anchors) ? msg.anchors : [], msg.activeThreadId ?? null);
+      } else if (data.type === "mist-active") {
+        const msg = data as { activeThreadId?: string | null };
+        engine.setActive(msg.activeThreadId ?? null);
+      }
+    });
+
+    post({ type: "mist-annotator-ready" });
   }
 
   if (document.readyState === "loading") {
@@ -500,9 +556,9 @@ export function installMistAnnotator(kit: AnchorKit): void {
 }
 
 /**
- * The script tag injected into the preview srcdoc. Serialized from the real
- * functions above so the injected code never drifts from the tested code.
+ * The script tag injected into sandboxed preview srcdocs. Serialized from the
+ * real functions above so the injected code never drifts from the tested code.
  */
 export function buildAnnotatorScript(): string {
-  return `<script>(${installMistAnnotator.toString()})((${createAnchorKit.toString()})());</script>`;
+  return `<script>(${installMistAnnotator.toString()})((${createAnchorKit.toString()})(), ${createDomAnnotator.toString()});</script>`;
 }
