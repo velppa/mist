@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
-import type { ThreadData, ThreadReply, UserInfo } from "~/shared/types";
+import type { ThreadAnchor, ThreadData, ThreadReply, UserInfo } from "~/shared/types";
 import {
   scanDocumentComments,
   matchThreadsToComments,
@@ -199,6 +199,28 @@ export function useThreads({
     pendingActivateRef.current = commentText;
   }, []);
 
+  // Comment made on the rendered preview: no inline mark, located by its
+  // text-quote anchor instead. Created directly in the shared map.
+  const createAnchoredThread = useCallback(
+    (commentText: string, anchor: ThreadAnchor): string => {
+      const id = generateId();
+      const thread: ThreadData = {
+        id,
+        commentText,
+        highlightText: anchor.quote,
+        author: user,
+        createdAt: Date.now(),
+        resolved: false,
+        replies: [],
+        anchor,
+      };
+      threadsMapRef.current.set(id, JSON.stringify(thread));
+      setActiveThreadId(id);
+      return id;
+    },
+    [user],
+  );
+
   const addReply = useCallback(
     (threadId: string, text: string) => {
       const raw = threadsMapRef.current.get(threadId);
@@ -291,6 +313,7 @@ export function useThreads({
   return {
     threads,
     activateComment,
+    createAnchoredThread,
     addReply,
     resolveThread,
     deleteThread,

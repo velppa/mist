@@ -195,6 +195,18 @@ class DocumentRegistry extends Agent {
       return json({ documents: rows.map(toEntry) });
     }
 
+    // Every document in the registry, listed or not — the "my documents"
+    // view of a single-user (auth-off) instance, where ownership cannot
+    // be attributed and everything belongs to the operator.
+    if (request.method === "POST" && url.pathname === "/all") {
+      const rows = this.sql<Row>`
+        SELECT id, title, author, listed, format, created_at, updated_at
+        FROM documents
+        ORDER BY updated_at DESC
+      `;
+      return json({ documents: rows.map(toEntry) });
+    }
+
     if (request.method === "GET") {
       const rows = this.sql<Row>`
         SELECT id, title, author, listed, format, created_at, updated_at

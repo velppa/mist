@@ -455,6 +455,144 @@ describe("DocumentAgent", () => {
     });
   });
 
+  describe("thread API (/threads)", () => {
+    async function createDocWithThread() {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "hello world",
+            threads: [
+              {
+                id: "t1",
+                commentText: "needs work",
+                resolved: false,
+                replies: [],
+                anchor: {
+                  quote: "hello",
+                  prefix: "",
+                  suffix: "world",
+                  posStart: 0,
+                  posEnd: 5,
+                },
+              },
+            ],
+          }),
+        }),
+      );
+    }
+
+    it("GET /threads lists threads with anchors", async () => {
+      await createDocWithThread();
+      const res = await agent.onRequest(new Request("https://do/threads"));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        threads: Array<{ id: string; anchor?: { quote: string } }>;
+      };
+      expect(body.ok).toBe(true);
+      expect(body.threads).toHaveLength(1);
+      expect(body.threads[0].id).toBe("t1");
+      expect(body.threads[0].anchor?.quote).toBe("hello");
+    });
+
+    it("GET /threads on a missing document is 404", async () => {
+      const res = await agent.onRequest(new Request("https://do/threads"));
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /threads/:id/replies appends a reply with the verified author", async () => {
+      await createDocWithThread();
+      const res = await agent.onRequest(
+        new Request("https://do/threads/t1/replies", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-mist-author": "agent@example.com",
+          },
+          body: JSON.stringify({ text: "fixed in rev 2" }),
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      const list = (await agent
+        .onRequest(new Request("https://do/threads"))
+        .then((r) => r.json())) as {
+        threads: Array<{ replies: Array<{ text: string; author: { name: string } }> }>;
+      };
+      expect(list.threads[0].replies).toHaveLength(1);
+      expect(list.threads[0].replies[0].text).toBe("fixed in rev 2");
+      expect(list.threads[0].replies[0].author.name).toBe("agent@example.com");
+    });
+
+    it("POST /threads/:id/replies without text is 400", async () => {
+      await createDocWithThread();
+      const res = await agent.onRequest(
+        new Request("https://do/threads/t1/replies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }),
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("POST to an unknown thread is 404", async () => {
+      await createDocWithThread();
+      const res = await agent.onRequest(
+        new Request("https://do/threads/nope/replies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "hi" }),
+        }),
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /threads/:id/resolve unblocks PUT", async () => {
+      await createDocWithThread();
+      const blocked = await agent.onRequest(
+        new Request("https://do/", { method: "PUT", body: "replacement" }),
+      );
+      expect(blocked.status).toBe(409);
+
+      const res = await agent.onRequest(
+        new Request("https://do/threads/t1/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      const updated = await agent.onRequest(
+        new Request("https://do/", { method: "PUT", body: "replacement" }),
+      );
+      expect(updated.status).toBe(200);
+    });
+
+    it("resolve broadcasts the change to connected clients", async () => {
+      await createDocWithThread();
+      const client = connectYjsClient();
+      await new Promise((r) => setTimeout(r, 0));
+
+      await agent.onRequest(
+        new Request("https://do/threads/t1/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resolved: true }),
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+
+      const raw = client.doc.getMap<string>("threads").get("t1");
+      expect(raw).toBeTruthy();
+      expect((JSON.parse(raw!) as { resolved: boolean }).resolved).toBe(true);
+      cleanup(client);
+    });
+  });
+
   describe("state chunking", () => {
     it("persists content larger than one chunk row and reloads it", async () => {
       // ~3 MB of text spans multiple 1.5 MB state chunks

@@ -37,14 +37,6 @@ export default function UserMenu({
           >
             <DropdownMenu.Item asChild>
               <Link
-                to="/my"
-                className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
-              >
-                My docs
-              </Link>
-            </DropdownMenu.Item>
-            <DropdownMenu.Item asChild>
-              <Link
                 to="/tokens"
                 className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
               >

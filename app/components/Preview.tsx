@@ -7,6 +7,7 @@ import { buildJsxRunnerHtml } from "~/lib/jsx-runner";
 import { buildIpynbRunnerHtml } from "~/lib/ipynb-runner";
 import { headingAnchors } from "~/lib/heading-anchors";
 import { stripCriticMarkup } from "~/lib/critic-parser";
+import HtmlPreview from "~/components/HtmlPreview";
 
 marked.use(headingAnchors());
 
@@ -48,14 +49,7 @@ export default function Preview() {
     // iframe loads, so /raw would bounce to login. The doc text is already
     // synced client-side. Sandbox without allow-same-origin keeps the
     // note's scripts in an opaque origin, away from the viewer's cookies.
-    return (
-      <iframe
-        srcDoc={stripCriticMarkup(markdown)}
-        sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
-        className="h-full w-full border-0"
-        title="preview"
-      />
-    );
+    return <HtmlPreview />;
   }
 
   if (format === "jsx" || format === "ipynb") {

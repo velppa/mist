@@ -2,6 +2,7 @@ import { createRequestHandler, RouterContextProvider } from "react-router";
 import { routeAgentRequest } from "agents";
 import { cloudflareContext } from "../app/lib/cloudflare.server";
 import { handleDocUpdate, handleListedUpdate } from "../app/lib/update.server";
+import { handleThreadsRequest } from "../app/lib/threads.server";
 import { handleAssetUpload, handleAssetGet } from "../app/lib/assets.server";
 import {
   getBearerEmail,
@@ -57,6 +58,11 @@ export default {
     // Listed flag: one write path for the DOC menu and the My-docs table
     if (request.method === "POST" && /^\/docs\/[^/]+\/listed$/.test(url.pathname)) {
       return handleListedUpdate(request, env);
+    }
+
+    // Comment threads: programmatic read/reply/resolve (agent reviewers)
+    if (/^\/docs\/[^/]+\/threads(\/|$)/.test(url.pathname)) {
+      return handleThreadsRequest(request, env);
     }
 
     if (url.pathname.startsWith("/agents/") && request.method === "POST") {

@@ -8,6 +8,8 @@ export default function CommentInput() {
     handleCommentActiveChange: onActiveChange,
     commentSelection: selection,
     activateComment: onCommentInserted,
+    previewAnchor,
+    submitPreviewComment,
   } = useDocument();
 
   const [comment, setComment] = useState("");
@@ -33,7 +35,16 @@ export default function CommentInput() {
   }, [active]);
 
   const handleSubmit = useCallback(() => {
-    if (!editor || !comment.trim()) return;
+    if (!comment.trim()) return;
+
+    // Preview comment: anchored by text quote, no inline mark
+    if (previewAnchor) {
+      submitPreviewComment(comment.trim());
+      setComment("");
+      return;
+    }
+
+    if (!editor) return;
 
     const from = selection ? selection.from : editor.state.selection.from;
     const to = selection ? selection.to : editor.state.selection.from;
@@ -70,7 +81,7 @@ export default function CommentInput() {
     onCommentInserted(comment);
     setComment("");
     onActiveChange(false);
-  }, [editor, comment, selection, onCommentInserted, onActiveChange]);
+  }, [editor, comment, selection, previewAnchor, submitPreviewComment, onCommentInserted, onActiveChange]);
 
   const handleCancel = useCallback(() => {
     setComment("");

@@ -13,6 +13,19 @@ export interface ThreadReply {
   createdAt: number;
 }
 
+/**
+ * Text-quote selector locating a comment in rendered (preview) text:
+ * the exact quote plus surrounding context, re-resolved against the
+ * current text on every paint. Positions are hints, never authority.
+ */
+export interface ThreadAnchor {
+  quote: string;
+  prefix: string;
+  suffix: string;
+  posStart: number;
+  posEnd: number;
+}
+
 export interface ThreadData {
   id: string;
   commentText: string;
@@ -21,6 +34,8 @@ export interface ThreadData {
   createdAt: number;
   resolved: boolean;
   replies: ThreadReply[];
+  /** Present on comments made in the HTML preview; absent on editor comments. */
+  anchor?: ThreadAnchor;
 }
 
 /**

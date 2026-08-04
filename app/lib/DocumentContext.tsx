@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router";
 import { getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
 import { parseViewMode, applyViewMode } from "~/lib/view-mode";
 import type { DocFormat } from "~/shared/constants";
-import type { CapturedSelection, DocMode } from "~/shared/types";
+import type { CapturedSelection, DocMode, ThreadAnchor } from "~/shared/types";
 import type { MatchedThread } from "~/lib/comment-threads";
 import type { useYjsEditor } from "~/lib/useYjsEditor";
 import { useThreads } from "~/lib/useThreads";
@@ -57,6 +57,11 @@ export interface DocumentContextValue {
   openCommentInput: () => void;
   handleCommentActiveChange: (active: boolean) => void;
   activateComment: (commentText: string) => void;
+  // Commenting on the rendered HTML preview: the pending text-quote
+  // anchor and the submit path that stores it as an anchored thread.
+  previewAnchor: ThreadAnchor | null;
+  handlePreviewCommentRequest: (anchor: ThreadAnchor) => void;
+  submitPreviewComment: (text: string) => void;
   handleResolveAtCursor: () => void;
   handleDeleteAtCursor: () => void;
 
@@ -112,6 +117,7 @@ export function DocumentProvider({
   const [commentActive, setCommentActive] = useState(false);
   const [commentSelection, setCommentSelection] = useState<CapturedSelection | null>(null);
   const [commentHighlight, setCommentHighlight] = useState<{ from: number; to: number } | null>(null);
+  const [previewAnchor, setPreviewAnchor] = useState<ThreadAnchor | null>(null);
   const [cleanView, setCleanView] = useState(true);
   // Per-user preference, remembered across documents. SSR renders the
   // default; the stored value is applied after mount so hydration matches.
@@ -129,6 +135,7 @@ export function DocumentProvider({
   const {
     threads,
     activateComment,
+    createAnchoredThread,
     addReply,
     resolveThread,
     deleteThread,
@@ -223,9 +230,30 @@ export function DocumentProvider({
         setCommentActive(false);
         setCommentSelection(null);
         setCommentHighlight(null);
+        setPreviewAnchor(null);
       }
     },
     [openCommentInput],
+  );
+
+  // Selection commented in the preview iframe: open the composer with the
+  // quoted text; submit stores an anchored thread instead of an inline mark.
+  const handlePreviewCommentRequest = useCallback((anchor: ThreadAnchor) => {
+    setPreviewAnchor(anchor);
+    setCommentSelection({ from: 0, to: 0, text: anchor.quote });
+    setCommentHighlight(null);
+    setCommentActive(true);
+  }, []);
+
+  const submitPreviewComment = useCallback(
+    (text: string) => {
+      if (!previewAnchor) return;
+      createAnchoredThread(text, previewAnchor);
+      setPreviewAnchor(null);
+      setCommentSelection(null);
+      setCommentActive(false);
+    },
+    [previewAnchor, createAnchoredThread],
   );
 
   const clearDocument = useCallback(() => {
@@ -313,6 +341,9 @@ export function DocumentProvider({
     openCommentInput,
     handleCommentActiveChange,
     activateComment,
+    previewAnchor,
+    handlePreviewCommentRequest,
+    submitPreviewComment,
     handleResolveAtCursor,
     handleDeleteAtCursor,
     threads,

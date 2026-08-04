@@ -528,7 +528,117 @@ class DocumentAgent extends Agent {
     return reasons.length > 0 ? `cannot update: ${reasons.join(", ")}` : null;
   }
 
+  /** JSON error response for the thread API. */
+  private threadError(message: string, status: number): Response {
+    return new Response(JSON.stringify({ ok: false, error: message }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  /**
+   * Comment-thread API: list threads, reply, resolve. Gives programmatic
+   * reviewers (agents) the same conversation surface the editor UI has;
+   * every mutation broadcasts to connected clients like any server write.
+   */
+  private async handleThreadsRequest(request: Request, url: URL): Promise<Response> {
+    const { doc } = this.ensureInitialised();
+    const existsRows = this.sql<{ value: ArrayBuffer }>`
+      SELECT value FROM doc_state WHERE key = 'exists'
+    `;
+    if (existsRows.length === 0) {
+      return this.threadError("document not found", 404);
+    }
+
+    const threadsMap = doc.getMap<string>("threads");
+
+    if (request.method === "GET" && url.pathname === "/threads") {
+      const threads: unknown[] = [];
+      for (const raw of threadsMap.values()) {
+        try {
+          threads.push(JSON.parse(raw));
+        } catch {
+          // skip malformed entries
+        }
+      }
+      threads.sort(
+        (a, b) =>
+          ((a as { createdAt?: number }).createdAt ?? 0) -
+          ((b as { createdAt?: number }).createdAt ?? 0),
+      );
+      return new Response(JSON.stringify({ ok: true, threads }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const action = url.pathname.match(/^\/threads\/([^/]+)\/(replies|resolve)$/);
+    if (request.method === "POST" && action) {
+      const [, threadId, verb] = action;
+
+      // Body first: the thread is read and rewritten in one synchronous
+      // block below, so no other event can interleave a lost update.
+      let body: { text?: unknown; resolved?: unknown } = {};
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        // verbs with optional bodies proceed with defaults
+      }
+
+      const raw = threadsMap.get(threadId);
+      if (!raw) {
+        return this.threadError("thread not found", 404);
+      }
+      let thread: {
+        resolved?: boolean;
+        replies?: Array<{ id: string; author: unknown; text: string; createdAt: number }>;
+      };
+      try {
+        thread = JSON.parse(raw);
+      } catch {
+        return this.threadError("thread entry is malformed", 500);
+      }
+
+      if (verb === "replies") {
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        if (!text) {
+          return this.threadError('body must be {"text": "..."}', 400);
+        }
+        // Identity comes from the worker-verified header, never the client
+        const name = request.headers.get("x-mist-author") || "agent";
+        const reply = {
+          id: Math.random().toString(36).slice(2, 10),
+          author: { name, color: "#6b7280", colorLight: "rgba(107, 114, 128, 0.2)" },
+          text,
+          createdAt: Date.now(),
+        };
+        thread.replies = [...(thread.replies ?? []), reply];
+        doc.transact(() => {
+          threadsMap.set(threadId, JSON.stringify(thread));
+        }, SERVER_ORIGIN);
+        return new Response(JSON.stringify({ ok: true, reply }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // verb === "resolve"
+      const resolved = typeof body.resolved === "boolean" ? body.resolved : true;
+      thread.resolved = resolved;
+      doc.transact(() => {
+        threadsMap.set(threadId, JSON.stringify(thread));
+      }, SERVER_ORIGIN);
+      return new Response(JSON.stringify({ ok: true, resolved }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return this.threadError("not found", 404);
+  }
+
   async onRequest(request: Request) {
+    const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/threads" || requestUrl.pathname.startsWith("/threads/")) {
+      return this.handleThreadsRequest(request, requestUrl);
+    }
     if (request.method === "POST" && new URL(request.url).pathname === "/listed") {
       // Flip the homepage-visibility flag. The single write path for
       // both the DOC menu and the My-docs table; SERVER_ORIGIN makes

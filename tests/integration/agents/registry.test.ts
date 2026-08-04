@@ -124,6 +124,10 @@ vi.mock("agents", () => ({
           .sort((a, b) => b.updated_at - a.updated_at);
       }
 
+      if (query.includes("select") && query.includes("from documents") && !query.includes("where")) {
+        return [...mockRows.values()].sort((a, b) => b.updated_at - a.updated_at);
+      }
+
       if (query.includes("select") && query.includes("from documents")) {
         const limit = values[0] as number;
         return [...mockRows.values()]
@@ -271,6 +275,19 @@ describe("DocumentRegistry", () => {
     const docs = await byAuthor("Alice");
     expect(docs.map((d) => d.id)).toEqual(["a2", "a1"]);
     expect(docs.map((d) => d.listed)).toEqual([false, true]);
+  });
+
+  it("POST /all returns every document regardless of author or listing", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1000);
+    await upsert({ id: "a1", title: "Old", author: "Alice", listed: true });
+    vi.spyOn(Date, "now").mockReturnValue(2000);
+    await upsert({ id: "b1", title: "Anon", listed: false });
+
+    const res = await agent.onRequest(
+      new Request("https://registry/all", { method: "POST" }),
+    );
+    const body = (await res.json()) as { documents: RegistryEntry[] };
+    expect(body.documents.map((d) => d.id)).toEqual(["b1", "a1"]);
   });
 
   it("rejects by-author without an email", async () => {
