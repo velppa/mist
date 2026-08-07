@@ -11,7 +11,7 @@ import {
 import type { RegistryEntry } from "~/shared/types";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import { getSessionEmail, isSsoConfigured, type AuthEnv } from "~/lib/auth.server";
-import { deserializeThreads } from "~/lib/thread-serialization";
+import { demoThreads } from "./demo-threads";
 import { useLoaderRefresh } from "~/lib/useLoaderRefresh";
 import { useCreateDoc } from "~/lib/useCreateDoc";
 import ThemeSelector from "~/components/ThemeSelector";
@@ -178,12 +178,15 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleDemoDocument() {
-    const { body, threads, onboarding } = deserializeThreads(demoDocument);
     const id = generateDocumentId();
     await fetch(`/agents/document-agent/${id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: body, threads, onboarding }),
+      body: JSON.stringify({
+        content: demoDocument,
+        threads: demoThreads,
+        onboarding: true,
+      }),
     });
     navigate(`/docs/${id}?view=edit`);
   }

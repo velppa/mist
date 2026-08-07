@@ -41,84 +41,25 @@ describe("extractDocMeta", () => {
     });
   });
 
-  describe("author", () => {
-    it("reads author from frontmatter", () => {
-      const md = "---\nauthor: Alice Smith\n---\n# Doc";
-      expect(extractDocMeta(md).author).toBe("Alice Smith");
-    });
-
-    it("returns null when there is no frontmatter", () => {
-      expect(extractDocMeta("# Doc").author).toBeNull();
-    });
-
-    it("returns null when frontmatter has no author", () => {
-      const md = "---\ntags: [a, b]\n---\n# Doc";
-      expect(extractDocMeta(md).author).toBeNull();
-    });
-
-    it("returns null for non-string author values", () => {
-      const md = "---\nauthor: [a, b]\n---\n# Doc";
-      expect(extractDocMeta(md).author).toBeNull();
-    });
-
-    it("ignores malformed YAML frontmatter", () => {
-      const md = "---\nauthor: [unclosed\n---\n# Doc";
-      const meta = extractDocMeta(md);
-      expect(meta.author).toBeNull();
-      expect(meta.title).toBe("Doc");
-    });
-
-    it("treats unterminated frontmatter as body", () => {
-      const md = "---\nauthor: Alice\n# Heading";
-      const meta = extractDocMeta(md);
-      expect(meta.author).toBeNull();
-      expect(meta.title).toBe("Heading");
-    });
-
-    it("trims whitespace around the author", () => {
-      const md = '---\nauthor: "  Bob  "\n---\ntext';
-      expect(extractDocMeta(md).author).toBe("Bob");
-    });
+  it("keeps the frontmatter out of the title", () => {
+    const md = "---\nauthor: Alice Smith\n---\n# Doc";
+    expect(extractDocMeta(md).title).toBe("Doc");
   });
 
-  describe("listed", () => {
-    it("is false by default", () => {
-      expect(extractDocMeta("# Doc").isListed).toBe(false);
-    });
-
-    it("reads listed: true from frontmatter", () => {
-      const md = "---\nlisted: true\n---\n# Doc";
-      expect(extractDocMeta(md).isListed).toBe(true);
-    });
-
-    it("ignores the pre-rename public: true spelling", () => {
-      const md = "---\npublic: true\n---\n# Doc";
-      expect(extractDocMeta(md).isListed).toBe(false);
-    });
-
-    it("is false for listed: false", () => {
-      const md = "---\nlisted: false\n---\n# Doc";
-      expect(extractDocMeta(md).isListed).toBe(false);
-    });
-
-    it("is false for non-boolean listed values", () => {
-      const md = '---\nlisted: "yes"\n---\n# Doc';
-      expect(extractDocMeta(md).isListed).toBe(false);
-    });
+  it("treats unterminated frontmatter as body", () => {
+    expect(extractDocMeta("---\nauthor: Alice\n# Heading").title).toBe("Heading");
   });
 });
 
 describe("extractDocMetaForFormat", () => {
-  it("txt: first non-empty line is the title, no frontmatter semantics", () => {
+  it("txt: first non-empty line is the title", () => {
     const meta = extractDocMetaForFormat("\n\nshopping list\nmilk", "txt");
-    expect(meta).toEqual({ title: "shopping list", author: null, isListed: false });
+    expect(meta).toEqual({ title: "shopping list" });
   });
 
   it("txt: frontmatter-looking text is just text", () => {
-    const meta = extractDocMetaForFormat("---\nauthor: a@b.c\nlisted: true\n---\nbody", "txt");
+    const meta = extractDocMetaForFormat("---\nauthor: a@b.c\n---\nbody", "txt");
     expect(meta.title).toBe("---");
-    expect(meta.author).toBeNull();
-    expect(meta.isListed).toBe(false);
   });
 
   it("html: <title> wins", () => {
@@ -142,9 +83,7 @@ describe("extractDocMetaForFormat", () => {
   });
 
   it("md: delegates to the markdown extractor", () => {
-    const meta = extractDocMetaForFormat("---\nauthor: a@b.c\n---\n# T", "md");
-    expect(meta.title).toBe("T");
-    expect(meta.author).toBe("a@b.c");
+    expect(extractDocMetaForFormat("---\nauthor: a@b.c\n---\n# T", "md").title).toBe("T");
   });
 });
 

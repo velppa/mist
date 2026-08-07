@@ -383,7 +383,7 @@ describe("DocumentAgent", () => {
       expect(body.text).toContain("author: x");
     });
 
-    it("PUT strips markdown frontmatter for md documents", async () => {
+    it("PUT keeps markdown frontmatter in the body", async () => {
       await agent.onRequest(
         new Request("https://do/", {
           method: "POST",
@@ -391,7 +391,7 @@ describe("DocumentAgent", () => {
           body: JSON.stringify({ content: "old" }),
         }),
       );
-      const md = "---\nmist:\n  threads: []\n---\n\n# Doc";
+      const md = "---\nname: skill\nversion: v1\n---\n\n# Doc";
       const res = await agent.onRequest(
         new Request("https://do/", {
           method: "PUT",
@@ -403,7 +403,7 @@ describe("DocumentAgent", () => {
       const body = (await agent
         .onRequest(new Request("https://do/?include=text"))
         .then((r) => r.json())) as { text?: string };
-      expect(body.text?.trim()).toBe("# Doc");
+      expect(body.text?.trim()).toBe(md.trim());
     });
   });
 
@@ -433,6 +433,65 @@ describe("DocumentAgent", () => {
         }),
       );
       expect(res.status).toBe(200);
+    });
+
+    it("PUT keeps the resolved conversation that led to the new version", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "text {==hl==}{>>note<<} tail",
+            threads: [
+              {
+                id: "t1",
+                commentText: "note",
+                resolved: true,
+                replies: [{ id: "r1", text: "fixed", author: { name: "agent" }, createdAt: 1 }],
+              },
+            ],
+          }),
+        }),
+      );
+
+      const res = await agent.onRequest(
+        new Request("https://do/", { method: "PUT", body: "replacement" }),
+      );
+      expect(res.status).toBe(200);
+
+      const listed = (await agent
+        .onRequest(new Request("https://do/threads"))
+        .then((r) => r.json())) as { threads: Array<{ id: string; replies: unknown[] }> };
+      expect(listed.threads).toHaveLength(1);
+      expect(listed.threads[0].id).toBe("t1");
+      expect(listed.threads[0].replies).toHaveLength(1);
+    });
+
+    it("PUT with threads replaces them wholesale", async () => {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: "text {==hl==}{>>note<<} tail",
+            threads: [{ id: "t1", commentText: "note", resolved: true, replies: [] }],
+          }),
+        }),
+      );
+
+      const res = await agent.onRequest(
+        new Request("https://do/", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "replacement", threads: [] }),
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      const listed = (await agent
+        .onRequest(new Request("https://do/threads"))
+        .then((r) => r.json())) as { threads: unknown[] };
+      expect(listed.threads).toHaveLength(0);
     });
 
     it("PUT still blocks on an unresolved thread", async () => {
@@ -926,7 +985,7 @@ describe("DocumentAgent", () => {
       expect(upsert!.body.listed).toBe(true);
     });
 
-    it("clears old comment threads on replace", async () => {
+    it("keeps old comment threads on replace", async () => {
       await agent.onRequest(
         new Request("https://do/", {
           method: "POST",
@@ -941,7 +1000,7 @@ describe("DocumentAgent", () => {
       expect(res.status).toBe(200);
 
       const client = connectYjsClient();
-      expect(client.doc.getMap("threads").size).toBe(0);
+      expect(client.doc.getMap("threads").size).toBe(1);
       cleanup(client);
     });
 
@@ -1233,7 +1292,7 @@ describe("DocumentAgent", () => {
       mockAgentEnv = { DocumentRegistry: {} };
     });
 
-    it("registers a listed document on POST with title and frontmatter author", async () => {
+    it("registers a listed document on POST with its title", async () => {
       await agent.onRequest(
         new Request("https://do/", {
           method: "POST",
@@ -1247,10 +1306,12 @@ describe("DocumentAgent", () => {
         }),
       );
 
+      // The author claim in the text is ignored — only the verified
+      // identity on the upload becomes the author.
       expect(registryCalls).toContainEqual(
         expect.objectContaining({
           path: "/upsert",
-          body: expect.objectContaining({ id: "test-doc", title: "My Title", author: "Alice", listed: true, format: "md" }),
+          body: expect.objectContaining({ id: "test-doc", title: "My Title", author: null, listed: true, format: "md" }),
         }),
       );
     });
@@ -1348,7 +1409,7 @@ describe("DocumentAgent", () => {
       }
     });
 
-    it("picks up frontmatter author added by an edit", async () => {
+    it("ignores an author claim typed into the document", async () => {
       vi.useFakeTimers();
       try {
         await agent.onRequest(
@@ -1373,7 +1434,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Written", author: "Bob", listed: true, format: "md", bumpUpdated: true },
+          body: { id: "test-doc", title: "Written", author: null, listed: true, format: "md", bumpUpdated: true },
         });
         cleanup(client);
       } finally {

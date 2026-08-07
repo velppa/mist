@@ -11,7 +11,6 @@ import {
   DOC_FORMAT_VERSION,
   REGISTRY_AGENT_NAME, effectiveFormat, type DocFormat } from "../app/shared/constants";
 import { extractDocMetaForFormat } from "../app/lib/doc-meta";
-import { deserializeThreads } from "../app/lib/thread-serialization";
 import {
   FORMAT_KEY,
   LISTED_KEY,
@@ -315,7 +314,7 @@ class DocumentAgent extends Agent {
       const { doc } = this.ensureInitialised();
       const registry = await getAgentByName(namespace, REGISTRY_AGENT_NAME);
 
-      const { title, author } = extractDocMetaForFormat(this.getPlainText(doc), this.format(doc));
+      const { title } = extractDocMetaForFormat(this.getPlainText(doc), this.format(doc));
       await registry.fetch(
         new Request("https://registry/upsert", {
           method: "POST",
@@ -323,7 +322,7 @@ class DocumentAgent extends Agent {
           body: JSON.stringify({
             id: this.name,
             title: title ?? this.name,
-            author: this.getStoredAuthor() ?? author,
+            author: this.getStoredAuthor(),
             listed: this.isListed(doc),
             format: this.format(doc),
             bumpUpdated,
@@ -709,18 +708,6 @@ class DocumentAgent extends Agent {
         // Empty/invalid body clears the document
       }
 
-      // The format decides how the body is interpreted: markdown gets
-      // frontmatter/thread handling, everything else stores verbatim.
-      // Decided here (not by the caller) because format is live state.
-      if (this.format(doc) === "md") {
-        if (body.content !== undefined && body.threads === undefined) {
-          const { body: mdBody, threads } = deserializeThreads(body.content ?? "");
-          body = { content: mdBody, threads };
-        }
-      } else {
-        body = { content: body.content };
-      }
-
       const { parseCriticMarkupToContent } = await import("../app/lib/critic-parser");
       try {
         // One transaction: a single update event (linear persist) and a
@@ -729,14 +716,20 @@ class DocumentAgent extends Agent {
         doc.transact(() => {
           const frag = doc.getXmlFragment("default");
           frag.delete(0, frag.length);
-          const threadsMap = doc.getMap<string>("threads");
-          for (const key of Array.from(threadsMap.keys())) {
-            threadsMap.delete(key);
+          // The comment history outlives the text it was written about:
+          // a caller that sends no threads replaces the content only, so
+          // the resolved conversation that led to this version survives.
+          // Sending threads replaces them wholesale.
+          if (body.threads !== undefined) {
+            const threadsMap = doc.getMap<string>("threads");
+            for (const key of Array.from(threadsMap.keys())) {
+              threadsMap.delete(key);
+            }
+            applyThreads(doc, body.threads);
           }
           if (body.content) {
             frag.insert(0, buildParagraphs(body.content, parseCriticMarkupToContent));
           }
-          applyThreads(doc, body.threads);
         }, SERVER_ORIGIN);
       } catch (err) {
         if (err instanceof Error && err.message.includes("Unsupported CriticMarkup")) {

@@ -75,45 +75,14 @@ Each suggestion (addition or deletion) can be accepted or rejected:
 
 ## Comments and threads
 
-Comment threads are stored in **YAML frontmatter** under the `mist` key. The frontmatter is prepended on download and stripped on upload.
+Threads live in the document agent, not in the text. They are reached
+through the thread API (`GET /docs/:id/threads`, and the reply/resolve
+routes) and through the sidebar; nothing about them is written into the
+markdown.
 
-### Format
-
-```yaml
----
-mist:
-  threads:
-    - comment: "This needs a citation"
-      highlight: "highlighted passage"
-      author: "Alice"
-      color: "#e06c75"
-      created: "2026-04-09T12:00:00.000Z"
-      resolved: false
-      replies:
-        - author: "Bob"
-          color: "#61afef"
-          text: "Added a citation to Smith 2024"
-          created: "2026-04-09T12:30:00.000Z"
----
-
-Document content with {==highlighted passage==}{>>This needs a citation<<} goes here.
-```
-
-### How threads connect to the document
-
-Threads are matched to comment marks in the document by comparing the `comment` field in the frontmatter with the comment text in the body. When a highlight is present, the `highlight` field records which passage the comment refers to.
-
-### Thread fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `comment` | yes | The comment text (matches `{>>text<<}` in the body) |
-| `highlight` | no | The highlighted passage (matches `{==text==}` in the body) |
-| `author` | yes | Display name |
-| `color` | yes | Author's cursor/avatar colour |
-| `created` | yes | ISO 8601 timestamp |
-| `resolved` | yes | Whether the thread is resolved |
-| `replies` | no | Array of reply objects (author, color, text, created) |
+An inline comment still leaves its CriticMarkup in the body — a highlight
+plus a comment, as above — and the thread that carries the conversation is
+matched to it by the comment text.
 
 ### Standalone comments
 
@@ -123,21 +92,15 @@ A comment without a highlight appears as a point marker in the document:
 Some text{>>A note about this point in the document<<} continues here.
 ```
 
-### Preserving other frontmatter
+## The body is stored verbatim
 
-Any existing YAML frontmatter keys outside `mist` are preserved through the round-trip. mist only reads and writes the `mist` key.
+An uploaded body is stored exactly as sent. mist reads no metadata out of
+it and writes none back into it: a leading `---` block is content like any
+other line, and `GET /raw/:id` returns what was uploaded, byte for byte.
 
-## Round-trip contract
+Downloading from the editor gives the current text the same way.
 
-The export/import cycle should produce identical output:
-
-1. **Download** serializes: CriticMarkup marks to delimiters, threads to YAML frontmatter.
-2. **Upload** parses: CriticMarkup delimiters to marks, YAML frontmatter to threads.
-3. **Download again** serializes the same state.
-
-The two downloaded files should be byte-identical. If they are not, it is a bug.
-
-### Known edge cases
+## Import edge cases
 
 - **Substitution syntax** is rejected on import — it must be manually converted to `{--old--}{++new++}` before uploading.
 

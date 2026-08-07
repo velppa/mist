@@ -1,25 +1,3 @@
----
-mist:
-  onboarding: true
-  threads:
-    - comment: "Should we use a stronger word here?"
-      highlight: "good"
-      author: "Alice"
-      color: "#E57373"
-      created: "2026-02-01T10:00:00Z"
-      resolved: false
-      replies:
-        - author: "Bob"
-          color: "#64B5F6"
-          text: "How about 'excellent'?"
-          created: "2026-02-01T10:05:00Z"
-    - comment: "This paragraph needs a citation."
-      author: "Alice"
-      color: "#E57373"
-      created: "2026-02-01T11:00:00Z"
-      resolved: false
----
-
 # mist
 
 This is a **collaborative Markdown editor** with _real-time_ multiplayer editing, suggestions, and inline comments.

@@ -149,27 +149,15 @@ describe("POST /new (action)", () => {
     expect(agentRequest.headers.get("Content-Type")).toBeNull();
   });
 
-  it("strips frontmatter and passes threads to agent", async () => {
-    const md = `---
-mist:
-  threads:
-    - comment: "Nice"
-      author: "Alice"
-      color: "#E57373"
-      created: "2026-01-01T00:00:00Z"
-      resolved: false
----
-
-# Doc with threads
-`;
+  it("stores the markdown body verbatim, frontmatter included", async () => {
+    const md = "---\nauthor: Alice\nlisted: true\n---\n\n# Doc with a header\n";
     const request = postRequest(md);
     await action({ request, context } as Parameters<typeof action>[0]);
 
     const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
     const body = await agentRequest.json();
-    expect(body.content).toBe("# Doc with threads\n");
-    expect(body.threads).toHaveLength(1);
-    expect(body.threads[0].commentText).toBe("Nice");
+    expect(body.content).toBe(md);
+    expect(body.threads).toBeUndefined();
   });
 
   it("returns 400 for binary content (null bytes)", async () => {
@@ -290,7 +278,7 @@ describe("POST /new authentication", () => {
     expect(agentRequest.headers.get("x-mist-author")).toBeNull();
   });
 
-  it("uses the frontmatter author when the submitter is anonymous", async () => {
+  it("ignores an author claim in the uploaded text", async () => {
     const response = await action({
       request: postRequest("---\nauthor: fm-alice\n---\n# Doc"),
       context,
@@ -298,10 +286,10 @@ describe("POST /new authentication", () => {
 
     expect(response.status).toBe(201);
     const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    expect(agentRequest.headers.get("x-mist-author")).toBe("fm-alice");
+    expect(agentRequest.headers.get("x-mist-author")).toBeNull();
   });
 
-  it("prefers the verified email over a frontmatter author claim", async () => {
+  it("stamps the verified email as the author", async () => {
     mockEnv.MIST_API_TOKENS = '{"s3cret":"alice@vio.com"}';
 
     const response = await action({
@@ -316,20 +304,9 @@ describe("POST /new authentication", () => {
     expect(agentRequest.headers.get("x-mist-author")).toBe("alice@vio.com");
   });
 
-  it("forwards frontmatter listed: true as x-mist-listed", async () => {
+  it("never lists a document from the uploaded text", async () => {
     const response = await action({
       request: postRequest("---\nlisted: true\n---\n# Doc"),
-      context,
-    } as Parameters<typeof action>[0]);
-
-    expect(response.status).toBe(201);
-    const agentRequest = mockAgentFetch.mock.calls[0][0] as Request;
-    expect(agentRequest.headers.get("x-mist-listed")).toBe("true");
-  });
-
-  it("omits x-mist-listed without a frontmatter opt-in", async () => {
-    const response = await action({
-      request: postRequest("# Doc"),
       context,
     } as Parameters<typeof action>[0]);
 

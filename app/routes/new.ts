@@ -3,8 +3,6 @@ import { getAgentByName } from "agents";
 import type { Route } from "./+types/new";
 import { generateDocumentId, type DocFormat } from "~/shared/constants";
 import { getCloudflare } from "~/lib/cloudflare.server";
-import { deserializeThreads } from "~/lib/thread-serialization";
-import { extractDocMeta } from "~/lib/doc-meta";
 import { authenticateNewRequest, type AuthEnv } from "~/lib/auth.server";
 import { readUploadBody, textError } from "~/lib/upload.server";
 
@@ -63,29 +61,17 @@ export async function action({ request, context }: Route.ActionArgs) {
     const headers = new Headers();
     // Format is document state, seeded at creation; the id stays bare.
     headers.set("x-mist-format", format);
-    // Frontmatter (author/listed/threads) is a markdown concept; txt and
-    // html bodies are stored verbatim. Frontmatter is stripped before the
-    // content reaches the document, so claims are forwarded as headers;
-    // a verified email wins over a frontmatter author.
-    const meta = format === "md" ? extractDocMeta(content) : null;
-    const author = auth.email ?? meta?.author;
-    if (author) {
-      headers.set("x-mist-author", author);
-    }
-    if (meta?.isListed) {
-      headers.set("x-mist-listed", "true");
+    // The author is the identity behind the upload, never a claim in the
+    // uploaded text.
+    if (auth.email) {
+      headers.set("x-mist-author", auth.email);
     }
 
     const init: RequestInit = { method: "POST", headers };
 
     if (content.trim()) {
       headers.set("Content-Type", "application/json");
-      if (format === "md") {
-        const { body, threads } = deserializeThreads(content);
-        init.body = JSON.stringify({ content: body, threads });
-      } else {
-        init.body = JSON.stringify({ content });
-      }
+      init.body = JSON.stringify({ content });
     }
 
     const res = await stub.fetch(new Request("https://do/", init));

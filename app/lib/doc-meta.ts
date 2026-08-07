@@ -1,26 +1,19 @@
-import { parse as parseYaml } from "yaml";
 import type { DocFormat } from "~/shared/constants";
 
 /**
- * Metadata extracted from a markdown document, used to describe it in
- * the document registry (homepage listing).
+ * Metadata extracted from a document, used to describe it in the
+ * document registry (homepage listing).
  */
 export interface DocMeta {
   /** Display title, or null when the document has no usable text. */
   title: string | null;
-  /** Author from the frontmatter `author` field, or null. */
-  author: string | null;
-  /**
-   * Frontmatter `listed: true` opts the document into the homepage
-   * listing. Documents are private (unlisted) by default.
-   */
-  isListed: boolean;
 }
 
 /**
  * Split optional YAML frontmatter from the markdown body. Frontmatter
  * must start on the very first line with `---` and end with a matching
- * `---` line.
+ * `---` line. The document itself keeps the frontmatter — this only
+ * separates it so it is not mistaken for the body.
  */
 export function splitFrontmatter(markdown: string): {
   frontmatter: string | null;
@@ -64,30 +57,11 @@ function extractTitle(body: string): string | null {
 }
 
 /**
- * Extract registry metadata (title + author + visibility) from raw
- * markdown text. Never throws — malformed frontmatter is ignored.
+ * Registry metadata of a markdown document: the title, taken from the
+ * body so a frontmatter block never becomes the title.
  */
 export function extractDocMeta(markdown: string): DocMeta {
-  const { frontmatter, body } = splitFrontmatter(markdown);
-
-  let author: string | null = null;
-  let isListed = false;
-  if (frontmatter) {
-    try {
-      const data: unknown = parseYaml(frontmatter);
-      if (data && typeof data === "object") {
-        const value = (data as Record<string, unknown>).author;
-        if (typeof value === "string" && value.trim()) {
-          author = value.trim();
-        }
-        isListed = (data as Record<string, unknown>).listed === true;
-      }
-    } catch {
-      // Malformed YAML — no author, but the document is still valid
-    }
-  }
-
-  return { title: extractTitle(body), author, isListed };
+  return { title: extractTitle(splitFrontmatter(markdown).body) };
 }
 
 /** Title of an HTML document: <title>, else first <h1>, else null. */
@@ -102,10 +76,7 @@ function extractHtmlTitle(html: string): string | null {
   return null;
 }
 
-/**
- * Format-aware registry metadata. Frontmatter (author/listed) is a
- * markdown concept; txt and html notes only get a title.
- */
+/** Format-aware registry metadata: how each format names itself. */
 export function extractDocMetaForFormat(
   text: string,
   format: DocFormat,
@@ -115,10 +86,10 @@ export function extractDocMetaForFormat(
       return extractDocMeta(text);
     case "txt": {
       const first = text.split("\n").find((line) => line.trim());
-      return { title: first?.trim() ?? null, author: null, isListed: false };
+      return { title: first?.trim() ?? null };
     }
     case "html":
-      return { title: extractHtmlTitle(text), author: null, isListed: false };
+      return { title: extractHtmlTitle(text) };
     case "jsx": {
       // First meaningful line: skip blanks and import/export statements,
       // strip comment decorations
@@ -131,7 +102,7 @@ export function extractDocMetaForFormat(
         .replace(/^\/\/+\s*|^\/\*+\s*|^\*+\s*/, "")
         .replace(/\s*\*\/\s*$/, "")
         .trim();
-      return { title: title || null, author: null, isListed: false };
+      return { title: title || null };
     }
     case "ipynb": {
       // First markdown heading in the notebook; raw JSON never makes a title
@@ -145,12 +116,12 @@ export function extractDocMetaForFormat(
             ? cell.source.join("")
             : (cell.source ?? "");
           const m = src.match(/^#+\s+(.+)$/m);
-          if (m) return { title: m[1].trim(), author: null, isListed: false };
+          if (m) return { title: m[1].trim() };
         }
       } catch {
         // Malformed notebook — untitled
       }
-      return { title: null, author: null, isListed: false };
+      return { title: null };
     }
   }
 }
