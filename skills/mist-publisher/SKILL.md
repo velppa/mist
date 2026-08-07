@@ -11,7 +11,7 @@ Publish markdown, txt, jsx, ipynb or html to the mist instance using
 `/new` endpoint and return the document URL.
 
 ```
-MIST_HOST=https://mist.findhotel.workers.dev
+MIST_HOST=https://mist.example.instance
 ```
 
 ## 1. Authorization
@@ -54,12 +54,11 @@ User has OneLogin access but no token yet.
 Content not in a file yet → write it to a temp file first.
 
 ```sh
-TOKEN=${MIST_TOKEN:-$(cat ~/.config/mist/token)}
-curl -s -T file.md  "$MIST_HOST/new"              # markdown
-curl -s -T file.html "$MIST_HOST/new?format=html" # html
-curl -s -T file.txt  "$MIST_HOST/new?format=txt"  # plain text
+curl -s -T file.md   "$MIST_HOST/new"              # markdown
+curl -s -T file.html "$MIST_HOST/new?format=html"  # html
+curl -s -T file.txt  "$MIST_HOST/new?format=txt"   # plain text
 curl -s -T nb.ipynb  "$MIST_HOST/new?format=ipynb" # Jupyter notebook
-curl -s -T file.jsx  "$MIST_HOST/new?format=jsx"  # React component (rendered in preview)
+curl -s -T file.jsx  "$MIST_HOST/new?format=jsx"   # React component (rendered in preview)
 ```
 
 Response body = document URL. Give it to the user; offer to open it or copy it.
@@ -95,7 +94,7 @@ those edits. Never PUT a file you generated earlier in the session without
 re-fetching.
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" "$MIST_HOST/raw/<id>" -o current.md
+curl -s "$MIST_HOST/raw/<id>" -o current.md
 ```
 
 Diff it against your local copy; merge any manual edits before uploading.
@@ -130,13 +129,13 @@ unresolved keeps blocking PUT.
 These routes take the bearer token:
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" "$MIST_HOST/docs/<id>/threads"
+curl -s "$MIST_HOST/docs/<id>/threads"
 
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+curl -s -X POST -H "Content-Type: application/json" \
   -d '{"text": "Fixed in the new version."}' \
   "$MIST_HOST/docs/<id>/threads/<tid>/replies"
 
-curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+curl -s -X POST -H "Content-Type: application/json" \
   -d '{"resolved": true}' "$MIST_HOST/docs/<id>/threads/<tid>/resolve"
 ```
 
