@@ -2,7 +2,7 @@
 name: mist-publisher
 description: Publish a document to the mist instance and return its URL. Use when the user asks to publish, share, or upload "this doc", "the summary", a markdown/txt/html file, or conversation output to mist.
 compatibility: Requires curl.
-version: v1.2.0
+version: v1.3.0
 ---
 
 # mist-publisher
@@ -94,15 +94,13 @@ mist editor since you last uploaded; PUTting a stale local copy silently wipes
 those edits. Never PUT a file you generated earlier in the session without
 re-fetching.
 
-Reads are NOT token-authenticated: GET `/raw/<id>` (and GET `/docs/<id>`)
-require a OneLogin browser session and redirect (302) when hit with curl +
-bearer token. To download the current version:
-
-1. Fetch `$MIST_HOST/raw/<id>` via the claude-in-chrome tools (user's browser
-   has the session), or
-2. Ask the user to paste/save the current content.
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" "$MIST_HOST/raw/<id>" -o current.md
+```
 
 Diff it against your local copy; merge any manual edits before uploading.
+The editor page `/docs/<id>` is a browser view and redirects to OneLogin for
+curl — `/raw/<id>` is the read path for an agent.
 
 Replace a note's content with PUT (the id may carry a title alias):
 
@@ -116,13 +114,55 @@ curl -s -X PUT -T file.md "$MIST_HOST/docs/<id>"
   overwritten: unresolved comment threads (or inline comments never resolved)
   or pending suggest-mode edits. The body names the reason, e.g.
   `error: cannot update: 1 unresolved comment` / `pending suggestions`.
-  Ask the user to resolve/accept them in the mist UI, then retry. Never work
-  around the guard.
+  Comments are yours to work through — see "Resolve comments". Suggestions
+  are not: accepting or rejecting them is the user's call in the UI. Never
+  work around the guard.
 - Content is applied per the note's current format (markdown gets frontmatter
   and threads parsed; other formats stored verbatim). Author, creation date,
   and listed state are preserved.
 
-Toggle homepage visibility without touching content:
+## 5. Resolve comments
+
+The comments the user leaves on a note are review feedback addressed to you.
+Read them, act on them, answer them, then resolve them — a comment left
+unresolved keeps blocking PUT.
+
+These routes take the bearer token:
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" "$MIST_HOST/docs/<id>/threads"
+
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"text": "Fixed in the new version."}' \
+  "$MIST_HOST/docs/<id>/threads/<tid>/replies"
+
+curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"resolved": true}' "$MIST_HOST/docs/<id>/threads/<tid>/resolve"
+```
+
+- GET returns `{"ok":true,"threads":[…]}`, oldest first. Each thread carries
+  `id`, `author`, `commentText`, `createdAt`, `resolved`, `replies[]`, plus
+  `highlightText`/`anchor` for the passage it points at.
+- Replies are stamped with the identity behind the token — never send an
+  author field. `{"resolved": false}` reopens a thread.
+- Live editors see replies and resolutions immediately.
+
+Working through a 409 on update:
+
+1. GET the threads; the unresolved ones are the blockers.
+2. For each, apply the change the comment asks for to your local copy.
+3. Reply saying what you did (or why you did not), then resolve it.
+4. Retry the PUT.
+
+Resolve only after the comment is answered — resolving is how you tell the
+user the feedback landed, not a way to clear the guard. When a comment asks
+for a decision that is the user's to make, reply asking for it and leave the
+thread open. Deleting threads is the user's call, not yours; there is no API
+for it.
+
+## 6. Listed Documents visibility
+
+Toggle document visibility in "Listed Documents" without touching content:
 
 ```sh
 curl -s -X POST -H "Content-Type: application/json" \

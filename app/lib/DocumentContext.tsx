@@ -2,6 +2,13 @@ import { createContext, useContext, useState, useCallback, useMemo, useEffect } 
 import { useSearchParams } from "react-router";
 import { getMarkRange, type Editor as TiptapEditor } from "@tiptap/core";
 import { parseViewMode, applyViewMode } from "~/lib/view-mode";
+import {
+  DOC_WIDTHS,
+  DEFAULT_DOC_WIDTH,
+  parseDocWidth,
+  clearDocWidth,
+  type DocWidth,
+} from "~/lib/doc-width";
 import type { DocFormat } from "~/shared/constants";
 import type { CapturedSelection, DocMode, ThreadAnchor } from "~/shared/types";
 import type { MatchedThread } from "~/lib/comment-threads";
@@ -11,8 +18,7 @@ import { findCommentTextAtCursor } from "~/lib/comment-threads";
 import { serializeWithCriticMarkup } from "~/lib/critic-serializer";
 import { serializeYDocWithCriticMarkup } from "~/lib/y-serializer";
 
-export type DocWidth = "full" | "120" | "65";
-const DOC_WIDTHS: DocWidth[] = ["full", "120", "65"];
+export type { DocWidth };
 
 export interface DocumentContextValue {
   docId: string;
@@ -121,11 +127,14 @@ export function DocumentProvider({
   const [cleanView, setCleanView] = useState(true);
   // Per-user preference, remembered across documents. SSR renders the
   // default; the stored value is applied after mount so hydration matches.
-  const [docWidth, setDocWidthState] = useState<DocWidth>("120");
+  const [storedWidth, setStoredWidth] = useState<DocWidth>(DEFAULT_DOC_WIDTH);
   useEffect(() => {
     const stored = localStorage.getItem("mist-doc-width") as DocWidth | null;
-    if (stored && DOC_WIDTHS.includes(stored)) setDocWidthState(stored); // eslint-disable-line react-hooks/set-state-in-effect
+    if (stored && DOC_WIDTHS.includes(stored)) setStoredWidth(stored); // eslint-disable-line react-hooks/set-state-in-effect
   }, []);
+  // A ?width= link dictates the width it was shared at; without one the
+  // reader's own preference stands.
+  const docWidth = parseDocWidth(searchParams) ?? storedWidth;
 
   // The toggled view lives in the URL (?view=edit / preview by default) so
   // links are shareable; the transient "hold to peek" state stays local.
@@ -163,10 +172,17 @@ export function DocumentProvider({
     setCleanView((v) => !v);
   }, []);
 
-  const setDocWidth = useCallback((w: DocWidth) => {
-    localStorage.setItem("mist-doc-width", w);
-    setDocWidthState(w);
-  }, []);
+  const setDocWidth = useCallback(
+    (w: DocWidth) => {
+      localStorage.setItem("mist-doc-width", w);
+      setStoredWidth(w);
+      setSearchParams((prev) => clearDocWidth(prev), {
+        replace: true,
+        preventScrollReset: true,
+      });
+    },
+    [setSearchParams],
+  );
 
   const toggleListed = useCallback(() => {
     // One write path for the listed flag (shared with the My-docs
