@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router";
 import { generateDocumentId } from "~/shared/constants";
-import { deserializeThreads } from "~/lib/thread-serialization";
 
 /**
  * Document creation shared by the homepage toolbar and the doc-page
@@ -35,18 +34,10 @@ export function useCreateDoc() {
                 ? "html"
                 : "md";
       const id = generateDocumentId();
-      const payload =
-        format === "md"
-          ? (() => {
-              const { body, threads } = deserializeThreads(text);
-              return { content: body, threads };
-            })()
-          : { content: text };
-
       await fetch(`/agents/document-agent/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-mist-format": format },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ content: text }),
       });
 
       navigate(`/docs/${id}?view=edit`);

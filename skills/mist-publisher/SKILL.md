@@ -2,7 +2,7 @@
 name: mist-publisher
 description: Publish a document to the mist instance and return its URL. Use when the user asks to publish, share, or upload "this doc", "the summary", a markdown/txt/html file, or conversation output to mist.
 compatibility: Requires curl.
-version: v1.3.0
+version: v1.4.0
 ---
 
 # mist-publisher
@@ -117,9 +117,9 @@ curl -s -X PUT -T file.md "$MIST_HOST/docs/<id>"
   Comments are yours to work through — see "Resolve comments". Suggestions
   are not: accepting or rejecting them is the user's call in the UI. Never
   work around the guard.
-- Content is applied per the note's current format (markdown gets frontmatter
-  and threads parsed; other formats stored verbatim). Author, creation date,
-  and listed state are preserved.
+- The body is stored exactly as sent, whatever the format — frontmatter and
+  all. Author, creation date, and listed state belong to the note, not to the
+  text, and survive the update.
 
 ## 5. Resolve comments
 
@@ -154,6 +154,9 @@ Working through a 409 on update:
 3. Reply saying what you did (or why you did not), then resolve it.
 4. Retry the PUT.
 
+The update keeps the threads, so the resolved conversation stays on the note
+as the record of why this version looks the way it does.
+
 Resolve only after the comment is answered — resolving is how you tell the
 user the feedback landed, not a way to clear the guard. When a comment asks
 for a decision that is the user's to make, reply asking for it and leave the
@@ -172,12 +175,13 @@ curl -s -X POST -H "Content-Type: application/json" \
 ## Notes
 
 - New docs are unlisted (reachable only by URL). To list one on the homepage:
-  `listed: true` in frontmatter (markdown only), the DOC → Listed toggle, the
-  status cell on "My documents" tab, or `POST /docs/<id>/listed` (see Update).
+  the DOC → Listed toggle, the status cell on the "My documents" tab, or
+  `POST /docs/<id>/listed` (see Listed Documents visibility).
 - Ids are bare 8-char strings; URL extensions (`.md`, `.txt`, ...) and title
   aliases (`/docs/<slug>-<id>.<ext>`) are decorative. A note's format is
   switchable in the sidebar (MD / TXT / HTML / JSX / IPYNB).
 - `/raw/<id>` = verbatim source with the format's Content-Type;
   `/render/<id>` = rendered HTML page for any format.
-- Markdown uploads may carry frontmatter (e.g. `author`, `listed`,
-  `mist.threads`); other formats are stored verbatim.
+- Frontmatter carries no meaning to mist and is never consumed: a note that
+  starts with a `---` block keeps it, and reading the note back gives the
+  bytes that were uploaded.

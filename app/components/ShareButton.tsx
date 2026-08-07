@@ -1,11 +1,10 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { serializeThreads } from "~/lib/thread-serialization";
 import { useDocument } from "~/lib/DocumentContext";
 
 export default function ShareButton() {
-  const { docId, aliasId, markdown, threads, isListed, toggleListed } = useDocument();
+  const { docId, aliasId, markdown, isListed, toggleListed } = useDocument();
   const [copied, setCopied] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const navigate = useNavigate();
@@ -22,15 +21,14 @@ export default function ShareButton() {
   }, []);
 
   const handleDownload = useCallback(() => {
-    const content = serializeThreads(markdown, threads);
-    const blob = new Blob([content], { type: "text/markdown" });
+    const blob = new Blob([markdown], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = `${docId}.md`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [docId, markdown, threads]);
+  }, [docId, markdown]);
 
   return (
     <DropdownMenu.Root
