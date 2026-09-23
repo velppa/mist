@@ -66,6 +66,12 @@ describe("GET /render/:id", () => {
     expect(body).toContain("author: alice");
   });
 
+  it("lays markdown out 120 characters wide", async () => {
+    mockDoc({ text: "# Heading", title: "Heading" });
+    const body = await ((await call("abcd1234")) as Response).text();
+    expect(body).toContain("max-width: 120ch;");
+  });
+
   it("renders jsx via the runner page", async () => {
     mockDoc({ text: "export default () => null", format: "jsx" });
     const res = (await call("abcd1234")) as Response;

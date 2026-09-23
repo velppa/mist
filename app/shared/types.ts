@@ -50,6 +50,8 @@ export interface RegistryEntry {
   author: string | null;
   /** Listed entries appear on the homepage; unlisted only under "My docs". */
   listed: boolean;
+  /** Public entries are readable on /raw and /render without signing in. */
+  publicAccess: boolean;
   /** Document format ("md", "txt", ...); defaults to markdown. */
   format?: string;
   createdAt: number;

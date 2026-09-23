@@ -1,6 +1,13 @@
 /** Key in the shared Yjs docState map carrying the listing opt-in. */
 export const LISTED_KEY = "listed";
 
+/**
+ * Key in the shared Yjs docState map carrying the public-access opt-in:
+ * public documents are readable on /raw and /render without signing in.
+ * Not "public", which is the legacy name of the listing flag.
+ */
+export const PUBLIC_ACCESS_KEY = "publicAccess";
+
 /** Key in the shared Yjs docState map carrying the document format. */
 export const FORMAT_KEY = "format";
 
@@ -11,6 +18,12 @@ export function readListedFlag(docState: {
   get(key: string): string | undefined;
 }): boolean {
   return docState.get(LISTED_KEY) === "true";
+}
+
+export function readPublicAccessFlag(docState: {
+  get(key: string): string | undefined;
+}): boolean {
+  return docState.get(PUBLIC_ACCESS_KEY) === "true";
 }
 
 /**

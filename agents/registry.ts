@@ -14,6 +14,7 @@ interface UpsertPayload {
   title?: unknown;
   author?: unknown;
   listed?: unknown;
+  publicAccess?: unknown;
   format?: unknown;
   bumpUpdated?: boolean;
 }
@@ -37,6 +38,7 @@ interface Row {
   title: string;
   author: string | null;
   listed: number;
+  public_access: number;
   format: string;
   created_at: number;
   updated_at: number;
@@ -48,6 +50,7 @@ function toEntry(row: Row): RegistryEntry {
     title: row.title,
     author: row.author,
     listed: row.listed === 1,
+    publicAccess: row.public_access === 1,
     format: row.format,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -70,6 +73,7 @@ class DocumentRegistry extends Agent {
         author TEXT,
         listed INTEGER NOT NULL DEFAULT 0,
         format TEXT NOT NULL DEFAULT 'md',
+        public_access INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
@@ -104,6 +108,11 @@ class DocumentRegistry extends Agent {
       // v3: format became registry metadata (defaulting to markdown).
       this.sql`ALTER TABLE documents ADD COLUMN format TEXT NOT NULL DEFAULT 'md'`;
     }
+
+    if (!cols.includes("public_access")) {
+      // v4: public access arrived; existing documents stay private.
+      this.sql`ALTER TABLE documents ADD COLUMN public_access INTEGER NOT NULL DEFAULT 0`;
+    }
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -132,9 +141,10 @@ class DocumentRegistry extends Agent {
           ? payload.author.trim()
           : null;
       const listed = payload.listed === true ? 1 : 0;
+      const publicAccess = payload.publicAccess === true ? 1 : 0;
       const format =
         typeof payload.format === "string" && payload.format ? payload.format : "md";
-      // Metadata flips (listed/format) must not reorder listings, so
+      // Metadata flips (listed/public/format) must not reorder listings, so
       // they leave updated_at alone; content edits bump it.
       const bump = payload.bumpUpdated !== false ? 1 : 0;
       const now = Date.now();
@@ -142,13 +152,14 @@ class DocumentRegistry extends Agent {
       // Keep created_at from the first upsert; keep a previously known
       // author if the new payload doesn't carry one.
       this.sql`
-        INSERT INTO documents (id, title, author, listed, format, created_at, updated_at)
-        VALUES (${id}, ${title}, ${author}, ${listed}, ${format}, ${now}, ${now})
+        INSERT INTO documents (id, title, author, listed, format, public_access, created_at, updated_at)
+        VALUES (${id}, ${title}, ${author}, ${listed}, ${format}, ${publicAccess}, ${now}, ${now})
         ON CONFLICT(id) DO UPDATE SET
           title = excluded.title,
           author = COALESCE(excluded.author, documents.author),
           listed = excluded.listed,
           format = excluded.format,
+          public_access = excluded.public_access,
           updated_at = CASE WHEN ${bump} = 1 THEN excluded.updated_at ELSE documents.updated_at END
       `;
 
@@ -186,7 +197,7 @@ class DocumentRegistry extends Agent {
       }
 
       const rows = this.sql<Row>`
-        SELECT id, title, author, listed, format, created_at, updated_at
+        SELECT id, title, author, listed, format, public_access, created_at, updated_at
         FROM documents
         WHERE author = ${payload.email}
         ORDER BY updated_at DESC
@@ -200,7 +211,7 @@ class DocumentRegistry extends Agent {
     // be attributed and everything belongs to the operator.
     if (request.method === "POST" && url.pathname === "/all") {
       const rows = this.sql<Row>`
-        SELECT id, title, author, listed, format, created_at, updated_at
+        SELECT id, title, author, listed, format, public_access, created_at, updated_at
         FROM documents
         ORDER BY updated_at DESC
       `;
@@ -209,7 +220,7 @@ class DocumentRegistry extends Agent {
 
     if (request.method === "GET") {
       const rows = this.sql<Row>`
-        SELECT id, title, author, listed, format, created_at, updated_at
+        SELECT id, title, author, listed, format, public_access, created_at, updated_at
         FROM documents
         WHERE listed = 1
         ORDER BY updated_at DESC

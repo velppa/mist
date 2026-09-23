@@ -171,7 +171,7 @@ function DocumentLayout() {
         <div className="flex shrink-0 items-stretch border-l border-border">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
+            className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
           >
             Upload
           </button>

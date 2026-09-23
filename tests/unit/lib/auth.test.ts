@@ -5,6 +5,7 @@ import {
   base64UrlEncode,
   buildAuthorizeUrl,
   configuredIssuer,
+  createIdTokenCookie,
   createSessionCookie,
   exchangeCode,
   generatePkce,
@@ -156,6 +157,19 @@ describe("session cookie", () => {
     });
     expect(getCookie(req, SESSION_COOKIE)).toBe("abc.def");
     expect(getCookie(req, "missing")).toBeNull();
+  });
+
+  it("createIdTokenCookie keeps the ID token readable by /auth routes", () => {
+    const setCookie = createIdTokenCookie("id.tok.en");
+    expect(setCookie).toMatch(/^mist_id_token=id\.tok\.en;/);
+    expect(setCookie).toContain("Path=/auth");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("Secure");
+
+    const req = new Request("https://x/", {
+      headers: { Cookie: setCookie.split(";")[0] },
+    });
+    expect(getCookie(req, "mist_id_token")).toBe("id.tok.en");
   });
 });
 

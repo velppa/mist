@@ -4,7 +4,8 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useDocument } from "~/lib/DocumentContext";
 
 export default function ShareButton() {
-  const { docId, aliasId, markdown, isListed, toggleListed } = useDocument();
+  const { docId, aliasId, markdown, isListed, toggleListed, isPublic, togglePublic } =
+    useDocument();
   const [copied, setCopied] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const navigate = useNavigate();
@@ -83,6 +84,14 @@ export default function ShareButton() {
             className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
           >
             {isListed ? "Listed ✓" : "Listed"}
+          </DropdownMenu.CheckboxItem>
+          <DropdownMenu.CheckboxItem
+            checked={isPublic}
+            onCheckedChange={togglePublic}
+            onSelect={(e) => e.preventDefault()}
+            className="block w-full cursor-pointer px-3 py-1.5 text-left text-sm outline-none data-[highlighted]:bg-border"
+          >
+            {isPublic ? "Public ✓" : "Public"}
           </DropdownMenu.CheckboxItem>
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item

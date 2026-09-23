@@ -13,7 +13,7 @@ export function escapeHtml(text: string): string {
 }
 
 const SHELL_STYLE = `
-  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 72ch;
+  body { font-family: ui-sans-serif, system-ui, sans-serif; max-width: 120ch;
          margin: 2rem auto; padding: 0 1rem; line-height: 1.7;
          background: #fafaf8; color: #1a1a1a; }
   h1, h2, h3, h4 { line-height: 1.3; }

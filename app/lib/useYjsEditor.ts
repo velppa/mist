@@ -5,7 +5,7 @@ import { Awareness } from "y-protocols/awareness";
 import { YjsProvider } from "./yjs-provider";
 import { USER_COLOURS, effectiveFormat, type DocFormat } from "~/shared/constants";
 import type { UserInfo, DocMode } from "~/shared/types";
-import { FORMAT_KEY, readListedFlag } from "~/shared/doc-state";
+import { FORMAT_KEY, readListedFlag, readPublicAccessFlag } from "~/shared/doc-state";
 
 function randomUserInfo(name?: string | null): UserInfo {
   const idx = Math.floor(Math.random() * USER_COLOURS.length);
@@ -33,6 +33,7 @@ export function useYjsEditor(
   const [mode, setModeState] = useState<DocMode>("edit");
   const [isOnboarding, setIsOnboarding] = useState(false);
   const [isListed, setIsListedState] = useState(false);
+  const [isPublic, setIsPublicState] = useState(false);
   // Server-known format until the doc syncs, then the live value
   const [format, setFormatState] = useState<DocFormat>(initialFormat ?? "md");
 
@@ -50,6 +51,7 @@ export function useYjsEditor(
       }
       setIsOnboarding(docState.get("onboarding") === "true");
       setIsListedState(readListedFlag(docState));
+      setIsPublicState(readPublicAccessFlag(docState));
       if (docState.has(FORMAT_KEY)) {
         setFormatState(effectiveFormat(docState.get(FORMAT_KEY)));
       }
@@ -91,5 +93,5 @@ export function useYjsEditor(
     };
   }, [socket, doc, awareness]);
 
-  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, format, setFormat };
+  return { doc, awareness, socket, synced, user, mode, setMode, docState, isOnboarding, isListed, isPublic, format, setFormat };
 }

@@ -4,6 +4,7 @@ import { getCloudflare } from "~/lib/cloudflare.server";
 import {
   configuredIssuer,
   externalUrl,
+  createIdTokenCookie,
   createSessionCookie,
   exchangeCode,
   getCookie,
@@ -129,6 +130,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   }
 
   let email: string;
+  let idToken: string;
   try {
     const issuer = configuredIssuer(authEnv);
     const { clientId, clientSecret } = oidcClient(authEnv);
@@ -140,6 +142,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       redirectUri: `${url.origin}/auth/callback`,
       codeVerifier: payload.verifier,
     });
+    idToken = id_token;
     email = await verifyIdToken({
       idToken: id_token,
       issuer,
@@ -153,6 +156,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const sessionCookie = await createSessionCookie(email, authEnv.SESSION_SECRET!);
   const headers = new Headers();
   headers.append("Set-Cookie", sessionCookie);
+  headers.append("Set-Cookie", createIdTokenCookie(idToken));
   // Expire the one-shot state cookie.
   headers.append(
     "Set-Cookie",

@@ -19,7 +19,7 @@ describe("/my", () => {
     } catch (res) {
       expect(res).toBeInstanceOf(Response);
       expect((res as Response).status).toBe(302);
-      expect((res as Response).headers.get("Location")).toBe("/?tab=my");
+      expect((res as Response).headers.get("Location")).toBe("/");
     }
   });
 });

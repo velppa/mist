@@ -4,24 +4,59 @@
 	"name": "mist",
 	"account_id": "5e2bfd4b0bf365b232cfc749bf0e62ee",
 	"compatibility_date": "2025-04-04",
-	"compatibility_flags": ["nodejs_compat"],
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"main": "./workers/app.ts",
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"redact_query_string": false
 	},
 	"durable_objects": {
 		"bindings": [
-			{ "name": "DocumentAgent", "class_name": "DocumentAgent" },
-			{ "name": "DocumentRegistry", "class_name": "DocumentRegistry" },
-			{ "name": "TokenStore", "class_name": "TokenStore" },
-			{ "name": "AssetStore", "class_name": "AssetStore" }
+			{
+				"name": "DocumentAgent",
+				"class_name": "DocumentAgent"
+			},
+			{
+				"name": "DocumentRegistry",
+				"class_name": "DocumentRegistry"
+			},
+			{
+				"name": "TokenStore",
+				"class_name": "TokenStore"
+			},
+			{
+				"name": "AssetStore",
+				"class_name": "AssetStore"
+			}
 		]
 	},
 	"migrations": [
-		{ "tag": "v1", "new_sqlite_classes": ["DocumentAgent"] },
-		{ "tag": "v2", "new_sqlite_classes": ["DocumentRegistry"] },
-		{ "tag": "v3", "new_sqlite_classes": ["TokenStore"] },
-		{ "tag": "v4", "new_sqlite_classes": ["AssetStore"] }
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"DocumentAgent"
+			]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": [
+				"DocumentRegistry"
+			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"TokenStore"
+			]
+		},
+		{
+			"tag": "v4",
+			"new_sqlite_classes": [
+				"AssetStore"
+			]
+		}
 	],
 	"keep_vars": true
 }

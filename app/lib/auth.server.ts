@@ -36,6 +36,8 @@ export interface AuthEnv {
 
 export const SESSION_COOKIE = "mist_session";
 export const OIDC_COOKIE = "mist_oidc";
+/** The provider's ID token, kept as the hint for provider logout. */
+export const ID_TOKEN_COOKIE = "mist_id_token";
 export const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // one week
 export const OIDC_STATE_MAX_AGE_SECONDS = 10 * 60; // login round-trip window
 
@@ -189,6 +191,11 @@ export async function createSessionCookie(email: string, secret: string): Promis
   const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
   const value = await signPayload({ email, exp } satisfies SessionPayload, secret);
   return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}`;
+}
+
+/** Remember the provider's ID token for as long as the session lives. */
+export function createIdTokenCookie(idToken: string): string {
+  return `${ID_TOKEN_COOKIE}=${idToken}; Path=/auth; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE_SECONDS}`;
 }
 
 export function getCookie(request: Request, name: string): string | null {

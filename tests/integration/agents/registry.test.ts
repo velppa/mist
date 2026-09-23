@@ -17,6 +17,7 @@ interface Row {
   author: string | null;
   listed: number;
   format?: string;
+  public_access?: number;
   created_at: number;
   updated_at: number;
 }
@@ -25,6 +26,7 @@ let mockRows: Map<string, Row>;
 // Emulates the visibility column's shape across schema generations
 let mockVisibilityColumn: "none" | "public" | "listed";
 let mockHasFormatColumn: boolean;
+let mockHasPublicAccessColumn: boolean;
 
 vi.mock("agents", () => ({
   Agent: class MockAgent {
@@ -40,6 +42,7 @@ vi.mock("agents", () => ({
         const names = ["id", "title", "author", "created_at", "updated_at"];
         if (mockVisibilityColumn !== "none") names.push(mockVisibilityColumn);
         if (mockHasFormatColumn) names.push("format");
+        if (mockHasPublicAccessColumn) names.push("public_access");
         return names.map((name) => ({ name }));
       }
 
@@ -50,6 +53,17 @@ vi.mock("agents", () => ({
         mockHasFormatColumn = true;
         for (const row of mockRows.values()) {
           if (row.format === undefined) row.format = "md";
+        }
+        return [];
+      }
+
+      if (query.includes("add column public_access")) {
+        if (mockHasPublicAccessColumn) {
+          throw new Error("duplicate column name: public_access");
+        }
+        mockHasPublicAccessColumn = true;
+        for (const row of mockRows.values()) {
+          if (row.public_access === undefined) row.public_access = 0;
         }
         return [];
       }
@@ -84,8 +98,8 @@ vi.mock("agents", () => ({
       }
 
       if (query.includes("insert into documents")) {
-        const [id, title, author, listed, format, createdAt, updatedAt, bump] =
-          values as [string, string, string | null, number, string, number, number, number];
+        const [id, title, author, listed, format, publicAccess, createdAt, updatedAt, bump] =
+          values as [string, string, string | null, number, string, number, number, number, number];
         const existing = mockRows.get(id);
         if (existing) {
           // Emulates ON CONFLICT: keep created_at, COALESCE author,
@@ -96,6 +110,7 @@ vi.mock("agents", () => ({
             author: author ?? existing.author,
             listed,
             format,
+            public_access: publicAccess,
             updated_at: bump === 0 ? existing.updated_at : updatedAt,
           });
         } else {
@@ -105,6 +120,7 @@ vi.mock("agents", () => ({
             author,
             listed,
             format,
+            public_access: publicAccess,
             created_at: createdAt,
             updated_at: updatedAt,
           });
@@ -149,6 +165,7 @@ describe("DocumentRegistry", () => {
   beforeEach(async () => {
     mockRows = new Map();
     mockHasFormatColumn = true;
+    mockHasPublicAccessColumn = true;
     mockVisibilityColumn = "listed";
     const mod = await import("../../../agents/registry");
     agent = new mod.default({} as never, {} as never);
@@ -348,6 +365,40 @@ describe("DocumentRegistry", () => {
     expect(await list()).toEqual([]); // stays unlisted
     expect(mockVisibilityColumn).toBe("listed");
     expect(await byAuthor("pavel@vio.com")).toEqual([]); // not adopted
+  });
+
+  it("v4 migration adds public access with every document private", async () => {
+    mockRows.set("old1", {
+      id: "old1",
+      title: "Old",
+      author: "someone@vio.com",
+      listed: 1,
+      format: "md",
+      created_at: 1,
+      updated_at: 1,
+    });
+    mockHasPublicAccessColumn = false;
+
+    const docs = await list();
+    expect(mockHasPublicAccessColumn).toBe(true);
+    expect(docs[0]).toMatchObject({ id: "old1", listed: true, publicAccess: false });
+  });
+
+  it("stores the public access flag without reordering listings", async () => {
+    await upsert({ id: "abc12345", title: "One", author: "a@x" });
+    const before = (await byAuthor("a@x"))[0];
+    expect(before.publicAccess).toBe(false);
+
+    await upsert({
+      id: "abc12345",
+      title: "One",
+      author: "a@x",
+      publicAccess: true,
+      bumpUpdated: false,
+    });
+    const after = (await byAuthor("a@x"))[0];
+    expect(after.publicAccess).toBe(true);
+    expect(after.updatedAt).toBe(before.updatedAt);
   });
 
   it("fresh databases need no migration and adopt nothing", async () => {

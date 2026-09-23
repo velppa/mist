@@ -11,6 +11,7 @@ const doc: RegistryEntry = {
   title: "SAPI Override Generator",
   author: "pavel@vio.com",
   listed: true,
+  publicAccess: false,
   createdAt: 1,
   updatedAt: 2,
 };
@@ -87,5 +88,45 @@ describe("DocTable", () => {
       .closest("label")!
       .querySelector("input[type=checkbox]") as HTMLInputElement;
     expect(box.disabled).toBe(true);
+  });
+
+  it("shared column toggles public access independently of listing", () => {
+    const listed: string[] = [];
+    const made: string[] = [];
+    const { getByText, getAllByRole } = render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(DocTable, {
+          documents: [doc],
+          showListed: true,
+          showShared: true,
+          onToggleListed: (d) => listed.push(d.id),
+          onTogglePublic: (d) => made.push(d.id),
+        }),
+      ),
+    );
+    expect(getAllByRole("columnheader").map((h) => h.textContent)).toContain("Shared");
+    const box = getByText("Public")
+      .closest("label")!
+      .querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    box.click();
+    expect(made).toEqual(["4q5dalwz"]);
+    expect(listed).toEqual([]);
+  });
+
+  it("shared column is plain text without a toggle callback", () => {
+    const { getByText } = render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(DocTable, {
+          documents: [{ ...doc, publicAccess: true }],
+          showShared: true,
+        }),
+      ),
+    );
+    expect(getByText("public").closest("label")).toBeNull();
   });
 });

@@ -14,7 +14,9 @@ import { extractDocMetaForFormat } from "../app/lib/doc-meta";
 import {
   FORMAT_KEY,
   LISTED_KEY,
+  PUBLIC_ACCESS_KEY,
   readListedFlag,
+  readPublicAccessFlag,
   migrateLegacyListedKey,
 } from "../app/shared/doc-state";
 import {
@@ -116,11 +118,21 @@ function xmlNodeText(node: ReturnType<Y.XmlFragment["get"]> | Y.XmlHook): string
   return "";
 }
 
+/**
+ * Boolean docState flags writable over HTTP: POST /<path> with
+ * {"<field>": true|false}.
+ */
+const DOC_FLAGS: Record<string, { key: string; field: string }> = {
+  "/listed": { key: LISTED_KEY, field: "listed" },
+  "/public": { key: PUBLIC_ACCESS_KEY, field: "public" },
+};
+
 class DocumentAgent extends Agent {
   private doc: Y.Doc | null = null;
   private awareness: awarenessProtocol.Awareness | null = null;
   private registrySyncTimer: ReturnType<typeof setTimeout> | null = null;
   private lastKnownListed = false;
+  private lastKnownPublicAccess = false;
   private lastKnownFormat: DocFormat = "md";
   /** Per-connection reassembly of oversized (chunked) client messages. */
   private assemblers = new Map<string, ChunkAssembler>();
@@ -216,6 +228,7 @@ class DocumentAgent extends Agent {
       this.saveState(Y.encodeStateAsUpdate(this.doc));
     }
     this.lastKnownListed = this.isListed(this.doc);
+    this.lastKnownPublicAccess = this.isPublicAccess(this.doc);
     this.lastKnownFormat = this.format(this.doc);
 
     // Persist on every update
@@ -242,9 +255,15 @@ class DocumentAgent extends Agent {
       // Visibility flips must reach the homepage immediately; ordinary
       // edits stay debounced so a burst results in a single registry write.
       const listed = this.isListed(this.doc!);
+      const publicAccess = this.isPublicAccess(this.doc!);
       const format = this.format(this.doc!);
-      if (listed !== this.lastKnownListed || format !== this.lastKnownFormat) {
+      if (
+        listed !== this.lastKnownListed ||
+        publicAccess !== this.lastKnownPublicAccess ||
+        format !== this.lastKnownFormat
+      ) {
         this.lastKnownListed = listed;
+        this.lastKnownPublicAccess = publicAccess;
         this.lastKnownFormat = format;
         // Metadata flip, not a content edit — keep the listing position
         void this.syncRegistry(false);
@@ -293,6 +312,10 @@ class DocumentAgent extends Agent {
     return readListedFlag(doc.getMap<string>("docState"));
   }
 
+  private isPublicAccess(doc: Y.Doc): boolean {
+    return readPublicAccessFlag(doc.getMap<string>("docState"));
+  }
+
   /**
    * Push this document's metadata to the singleton DocumentRegistry.
    * Unlisted documents stay registered (flagged) so their owner can
@@ -324,6 +347,7 @@ class DocumentAgent extends Agent {
             title: title ?? this.name,
             author: this.getStoredAuthor(),
             listed: this.isListed(doc),
+            publicAccess: this.isPublicAccess(doc),
             format: this.format(doc),
             bumpUpdated,
           }),
@@ -638,10 +662,11 @@ class DocumentAgent extends Agent {
     if (requestUrl.pathname === "/threads" || requestUrl.pathname.startsWith("/threads/")) {
       return this.handleThreadsRequest(request, requestUrl);
     }
-    if (request.method === "POST" && new URL(request.url).pathname === "/listed") {
-      // Flip the homepage-visibility flag. The single write path for
-      // both the DOC menu and the My-docs table; SERVER_ORIGIN makes
-      // the update handler broadcast it to connected editors.
+    const flag = DOC_FLAGS[requestUrl.pathname];
+    if (request.method === "POST" && flag) {
+      // Flip a visibility flag. The single write path for both the DOC
+      // menu and the My-docs table; SERVER_ORIGIN makes the update
+      // handler broadcast it to connected editors.
       const { doc } = this.ensureInitialised();
 
       const existsRows = this.sql<{ value: ArrayBuffer }>`
@@ -654,27 +679,27 @@ class DocumentAgent extends Agent {
         });
       }
 
-      let listed: boolean | undefined;
+      let value: boolean | undefined;
       try {
-        const body = (await request.json()) as { listed?: unknown };
-        if (typeof body.listed === "boolean") listed = body.listed;
+        const body = (await request.json()) as Record<string, unknown>;
+        if (typeof body[flag.field] === "boolean") value = body[flag.field] as boolean;
       } catch {
         // handled below
       }
-      if (listed === undefined) {
-        return new Response(JSON.stringify({ ok: false, error: "body must be {\"listed\": true|false}" }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
+      if (value === undefined) {
+        return new Response(
+          JSON.stringify({ ok: false, error: `body must be {"${flag.field}": true|false}` }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       doc.transact(() => {
-        doc.getMap<string>("docState").set(LISTED_KEY, listed ? "true" : "false");
+        doc.getMap<string>("docState").set(flag.key, value ? "true" : "false");
       }, SERVER_ORIGIN);
       // Metadata flip — keep the listing position
       await this.syncRegistry(false);
 
-      return new Response(JSON.stringify({ ok: true, listed }), {
+      return new Response(JSON.stringify({ ok: true, [flag.field]: value }), {
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -862,7 +887,16 @@ class DocumentAgent extends Agent {
       const format = this.format(doc);
       const { title } = extractDocMetaForFormat(text, format);
 
-      const body: Record<string, unknown> = { exists, createdAt, author, title, format };
+      const publicAccess = this.isPublicAccess(doc);
+
+      const body: Record<string, unknown> = {
+        exists,
+        createdAt,
+        author,
+        title,
+        format,
+        publicAccess,
+      };
       // The /raw route needs the verbatim document text
       if (new URL(request.url).searchParams.get("include") === "text") {
         body.text = text;
@@ -885,6 +919,7 @@ class DocumentAgent extends Agent {
       this.doc = null;
       this.awareness = null;
       this.lastKnownListed = false;
+      this.lastKnownPublicAccess = false;
       this.lastKnownFormat = "md";
 
       // The table may not exist yet when deleting a never-created doc

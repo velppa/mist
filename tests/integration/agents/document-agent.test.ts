@@ -682,7 +682,14 @@ describe("DocumentAgent", () => {
     it("returns exists: false for a fresh agent", async () => {
       const res = await agent.onRequest(new Request("https://do/"));
       const body = await res.json();
-      expect(body).toEqual({ exists: false, createdAt: null, author: null, title: null, format: "md" });
+      expect(body).toEqual({
+        exists: false,
+        createdAt: null,
+        author: null,
+        title: null,
+        format: "md",
+        publicAccess: false,
+      });
     });
 
     it("returns exists: true with createdAt after POST", async () => {
@@ -913,6 +920,70 @@ describe("DocumentAgent", () => {
       expect(res.status).toBe(200);
       await Promise.resolve();
       expect(client.doc.getMap<string>("docState").get("listed")).toBe("true");
+      cleanup(client);
+    });
+  });
+
+  describe("POST /public", () => {
+    beforeEach(() => {
+      mockAgentEnv = { DocumentRegistry: {} };
+    });
+
+    async function createDoc() {
+      await agent.onRequest(
+        new Request("https://do/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: "hello" }),
+        }),
+      );
+    }
+
+    function setPublic(body: unknown) {
+      return agent.onRequest(
+        new Request("https://do/public", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+    }
+
+    it("returns 404 before the document exists", async () => {
+      expect((await setPublic({ public: true })).status).toBe(404);
+    });
+
+    it("rejects a body without a boolean public field", async () => {
+      await createDoc();
+      const res = await setPublic({ listed: true });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: 'body must be {"public": true|false}' });
+    });
+
+    it("sets the flag, reports it, and syncs the registry immediately", async () => {
+      await createDoc();
+      registryCalls = [];
+      const res = await setPublic({ public: true });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, public: true });
+
+      const upsert = registryCalls.find((c) => c.path === "/upsert");
+      expect(upsert?.body).toMatchObject({ publicAccess: true, listed: false, bumpUpdated: false });
+
+      const meta = (await (await agent.onRequest(new Request("https://do/"))).json()) as {
+        publicAccess: boolean;
+      };
+      expect(meta.publicAccess).toBe(true);
+    });
+
+    it("leaves the listing flag alone", async () => {
+      await createDoc();
+      await setPublic({ public: true });
+      const client = connectYjsClient();
+      await Promise.resolve();
+      const docState = client.doc.getMap<string>("docState");
+      expect(docState.get("publicAccess")).toBe("true");
+      expect(docState.get("listed")).toBeUndefined();
       cleanup(client);
     });
   });
@@ -1401,7 +1472,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Updated Title", author: null, listed: true, format: "md", bumpUpdated: true },
+          body: { id: "test-doc", title: "Updated Title", author: null, listed: true, publicAccess: false, format: "md", bumpUpdated: true },
         });
         cleanup(client);
       } finally {
@@ -1434,7 +1505,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toHaveLength(1);
         expect(registryCalls[0]).toEqual({
           path: "/upsert",
-          body: { id: "test-doc", title: "Written", author: null, listed: true, format: "md", bumpUpdated: true },
+          body: { id: "test-doc", title: "Written", author: null, listed: true, publicAccess: false, format: "md", bumpUpdated: true },
         });
         cleanup(client);
       } finally {
@@ -1565,7 +1636,7 @@ describe("DocumentAgent", () => {
         expect(registryCalls).toEqual([
           {
             path: "/upsert",
-            body: { id: "test-doc", title: "Renamed", author: null, listed: true, format: "md", bumpUpdated: true },
+            body: { id: "test-doc", title: "Renamed", author: null, listed: true, publicAccess: false, format: "md", bumpUpdated: true },
           },
         ]);
         cleanup(client);

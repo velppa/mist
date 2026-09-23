@@ -171,11 +171,24 @@ curl -s -X POST -H "Content-Type: application/json" \
   -d '{"listed": true}' "$MIST_HOST/docs/<id>/listed"
 ```
 
+## 7. Public access
+
+Make a document's `/raw/<id>` and `/render/<id>` pages readable without
+signing in (the editor at `/docs/<id>` still requires sign-in):
+
+```sh
+curl -s -X POST -H "Content-Type: application/json" \
+  -d '{"public": true}' "$MIST_HOST/docs/<id>/public"
+```
+
 ## Notes
 
 - New docs are unlisted (reachable only by URL). To list one on the homepage:
   the DOC → Listed toggle, the status cell on the "My documents" tab, or
   `POST /docs/<id>/listed` (see Listed Documents visibility).
+- New docs are private. Only when the user asks, make one public: the
+  DOC → Public toggle, the Shared cell on "My documents", or
+  `POST /docs/<id>/public` (see Public access).
 - Ids are bare 8-char strings; URL extensions (`.md`, `.txt`, ...) and title
   aliases (`/docs/<slug>-<id>.<ext>`) are decorative. A note's format is
   switchable in the sidebar (MD / TXT / HTML / JSX / IPYNB).

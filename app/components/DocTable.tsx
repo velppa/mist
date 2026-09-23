@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import type { RegistryEntry } from "~/shared/types";
 import { effectiveFormat, docAliasPath } from "~/shared/constants";
 
-type SortKey = "title" | "format" | "author" | "listed" | "updatedAt";
+type SortKey = "title" | "format" | "author" | "listed" | "publicAccess" | "updatedAt";
 type SortDir = "asc" | "desc";
 
 function formatDate(timestamp: number): string {
@@ -21,9 +21,43 @@ function compare(a: RegistryEntry, b: RegistryEntry, key: SortKey): number {
       return (a.author ?? "").localeCompare(b.author ?? "");
     case "listed":
       return Number(a.listed) - Number(b.listed);
+    case "publicAccess":
+      return Number(a.publicAccess) - Number(b.publicAccess);
     case "updatedAt":
       return a.updatedAt - b.updatedAt;
   }
+}
+
+/** A per-row checkbox toggling one of the document's flags. */
+function FlagToggle({
+  label,
+  checked,
+  pending,
+  disabled,
+  onToggle,
+}: {
+  label: string;
+  checked: boolean;
+  pending: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-center gap-1.5 uppercase tracking-wider transition-colors hover:text-ink ${
+        pending ? "opacity-40" : ""
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={onToggle}
+        className="cursor-pointer accent-current disabled:cursor-default"
+      />
+      {label}
+    </label>
+  );
 }
 
 function SortHeader({
@@ -62,16 +96,22 @@ export default function DocTable({
   documents,
   showAuthor = false,
   showListed = false,
+  showShared = false,
   renderActions,
   onToggleListed,
   pendingListedId,
+  onTogglePublic,
+  pendingPublicId,
 }: {
   documents: RegistryEntry[];
   showAuthor?: boolean;
   showListed?: boolean;
+  showShared?: boolean;
   renderActions?: (doc: RegistryEntry) => React.ReactNode;
   onToggleListed?: (doc: RegistryEntry) => void;
   pendingListedId?: string | null;
+  onTogglePublic?: (doc: RegistryEntry) => void;
+  pendingPublicId?: string | null;
 }) {
   const [sortKey, setSortKey] = useState<SortKey>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -112,6 +152,7 @@ export default function DocTable({
           {header("Format", "format")}
           {showAuthor && header("Author", "author")}
           {showListed && header("Status", "listed")}
+          {showShared && header("Shared", "publicAccess")}
           {header("Date", "updatedAt")}
           {renderActions && <th />}
         </tr>
@@ -138,24 +179,34 @@ export default function DocTable({
             {showListed && (
               <td className="whitespace-nowrap py-2 pr-4 font-mono text-sm uppercase tracking-wider text-muted">
                 {onToggleListed ? (
-                  <label
-                    className={`flex cursor-pointer items-center gap-1.5 uppercase tracking-wider transition-colors hover:text-ink ${
-                      pendingListedId === doc.id ? "opacity-40" : ""
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={doc.listed}
-                      disabled={pendingListedId != null}
-                      onChange={() => onToggleListed(doc)}
-                      className="cursor-pointer accent-current disabled:cursor-default"
-                    />
-                    Listed
-                  </label>
+                  <FlagToggle
+                    label="Listed"
+                    checked={doc.listed}
+                    pending={pendingListedId === doc.id}
+                    disabled={pendingListedId != null}
+                    onToggle={() => onToggleListed(doc)}
+                  />
                 ) : doc.listed ? (
                   "listed"
                 ) : (
                   "unlisted"
+                )}
+              </td>
+            )}
+            {showShared && (
+              <td className="whitespace-nowrap py-2 pr-4 font-mono text-sm uppercase tracking-wider text-muted">
+                {onTogglePublic ? (
+                  <FlagToggle
+                    label="Public"
+                    checked={doc.publicAccess}
+                    pending={pendingPublicId === doc.id}
+                    disabled={pendingPublicId != null}
+                    onToggle={() => onTogglePublic(doc)}
+                  />
+                ) : doc.publicAccess ? (
+                  "public"
+                ) : (
+                  "private"
                 )}
               </td>
             )}

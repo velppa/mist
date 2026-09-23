@@ -1,7 +1,8 @@
 import { createRequestHandler, RouterContextProvider } from "react-router";
 import { routeAgentRequest } from "agents";
 import { cloudflareContext } from "../app/lib/cloudflare.server";
-import { handleDocUpdate, handleListedUpdate } from "../app/lib/update.server";
+import { handleDocUpdate, handleListedUpdate, handlePublicUpdate } from "../app/lib/update.server";
+import { isPublicDocumentPage } from "../app/lib/public-access.server";
 import { handleThreadsRequest } from "../app/lib/threads.server";
 import { handleAssetUpload, handleAssetGet } from "../app/lib/assets.server";
 import {
@@ -55,9 +56,12 @@ export default {
       return handleDocUpdate(request, env);
     }
 
-    // Listed flag: one write path for the DOC menu and the My-docs table
+    // Visibility flags: one write path for the DOC menu and the My-docs table
     if (request.method === "POST" && /^\/docs\/[^/]+\/listed$/.test(url.pathname)) {
       return handleListedUpdate(request, env);
+    }
+    if (request.method === "POST" && /^\/docs\/[^/]+\/public$/.test(url.pathname)) {
+      return handlePublicUpdate(request, env);
     }
 
     // Comment threads: programmatic read/reply/resolve (agent reviewers)
@@ -77,7 +81,8 @@ export default {
     } else if (isSsoConfigured(authEnv) && requiresLogin(url.pathname)) {
       // Browser pages require a session when SSO is configured.
       const email = await getSessionEmail(request, authEnv);
-      if (!email) {
+      // Public documents' /raw and /render pages are open to anyone.
+      if (!email && !(await isPublicDocumentPage(url.pathname, env))) {
         // Programmatic reads: on /raw a bearer token stands in for the
         // session, and a bad token gets a curl-friendly 401 instead of
         // a login redirect.

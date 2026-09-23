@@ -65,15 +65,19 @@ export async function handleDocUpdate(request: Request, env: unknown): Promise<R
 }
 
 /**
- * POST /docs/:id/listed — set the homepage-visibility flag via API.
- * The single write path for every listed toggle in the UI; the change
+ * POST /docs/:id/<flag> — set a document's visibility flag via API.
+ * The single write path for every such toggle in the UI; the change
  * reaches open editors through the document's server-origin broadcast.
  */
-export async function handleListedUpdate(request: Request, env: unknown): Promise<Response> {
+async function handleFlagUpdate(
+  request: Request,
+  env: unknown,
+  flag: "listed" | "public",
+): Promise<Response> {
   try {
     const url = new URL(request.url);
     const param = decodeURIComponent(
-      url.pathname.slice("/docs/".length, -"/listed".length),
+      url.pathname.slice("/docs/".length, -`/${flag}`.length),
     );
     const id = parseDocId(param);
     if (!id) {
@@ -88,7 +92,7 @@ export async function handleListedUpdate(request: Request, env: unknown): Promis
 
     const stub = await getAgentByName(authEnv.DocumentAgent, id);
     const res = await stub.fetch(
-      new Request("https://do/listed", {
+      new Request(`https://do/${flag}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: await request.text(),
@@ -103,4 +107,14 @@ export async function handleListedUpdate(request: Request, env: unknown): Promis
   } catch {
     return textError("something went wrong", 500);
   }
+}
+
+/** POST /docs/:id/listed — set the homepage-visibility flag. */
+export function handleListedUpdate(request: Request, env: unknown): Promise<Response> {
+  return handleFlagUpdate(request, env, "listed");
+}
+
+/** POST /docs/:id/public — set the sign-in-free /raw and /render access flag. */
+export function handlePublicUpdate(request: Request, env: unknown): Promise<Response> {
+  return handleFlagUpdate(request, env, "public");
 }

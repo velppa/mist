@@ -14,6 +14,7 @@ import { getSessionEmail, isSsoConfigured, type AuthEnv } from "~/lib/auth.serve
 import { demoThreads } from "./demo-threads";
 import { useLoaderRefresh } from "~/lib/useLoaderRefresh";
 import { useCreateDoc } from "~/lib/useCreateDoc";
+import { parseHomeTab, type HomeTab } from "~/lib/home-tab";
 import ThemeSelector from "~/components/ThemeSelector";
 import DocTable from "~/components/DocTable";
 import UserMenu from "~/components/UserMenu";
@@ -69,7 +70,7 @@ export function meta(_args: Route.MetaArgs) {
   ];
 }
 
-function DocTabs({ tab }: { tab: "listed" | "my" }) {
+function DocTabs({ tab }: { tab: HomeTab }) {
   const tabClass = (active: boolean) =>
     `border px-2.5 py-0.5 font-mono font-light text-sm uppercase tracking-wider transition-colors ${
       active
@@ -78,11 +79,11 @@ function DocTabs({ tab }: { tab: "listed" | "my" }) {
     }`;
   return (
     <div className="mb-4 flex gap-2">
-      <Link to="/" className={tabClass(tab === "listed")}>
-        Listed documents
-      </Link>
-      <Link to="/?tab=my" className={tabClass(tab === "my")}>
+      <Link to="/" className={tabClass(tab === "my")}>
         My documents
+      </Link>
+      <Link to="/?tab=listed" className={tabClass(tab === "listed")}>
+        Listed documents
       </Link>
     </div>
   );
@@ -106,23 +107,38 @@ function MyDocuments({
   const [armedId, setArmedId] = useState<string | null>(null);
   const revalidator = useRevalidator();
   const [pendingListedId, setPendingListedId] = useState<string | null>(null);
+  const [pendingPublicId, setPendingPublicId] = useState<string | null>(null);
 
-  async function handleToggleListed(doc: RegistryEntry) {
-    if (pendingListedId) return;
-    setPendingListedId(doc.id);
+  async function toggleFlag(
+    doc: RegistryEntry,
+    flag: "listed" | "public",
+    value: boolean,
+    setPending: (id: string | null) => void,
+  ) {
+    setPending(doc.id);
     try {
-      const res = await fetch(`/docs/${doc.id}/listed`, {
+      const res = await fetch(`/docs/${doc.id}/${flag}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listed: !doc.listed }),
+        body: JSON.stringify({ [flag]: value }),
       });
-      if (!res.ok) throw new Error(`listed toggle failed: ${res.status}`);
+      if (!res.ok) throw new Error(`${flag} toggle failed: ${res.status}`);
       revalidator.revalidate();
     } catch {
       // leave the row as-is; the next revalidation shows the truth
     } finally {
-      setPendingListedId(null);
+      setPending(null);
     }
+  }
+
+  function handleToggleListed(doc: RegistryEntry) {
+    if (pendingListedId) return;
+    void toggleFlag(doc, "listed", !doc.listed, setPendingListedId);
+  }
+
+  function handleTogglePublic(doc: RegistryEntry) {
+    if (pendingPublicId) return;
+    void toggleFlag(doc, "public", !doc.publicAccess, setPendingPublicId);
   }
 
   async function handleDelete(id: string) {
@@ -138,7 +154,7 @@ function MyDocuments({
   if (requiresLogin) {
     return (
       <p className="text-muted">
-        <a href="/auth/login?redirect=%2F%3Ftab%3Dmy" className="text-ink transition-colors hover:text-coral">
+        <a href="/auth/login?redirect=%2F" className="text-ink transition-colors hover:text-coral">
           Sign in
         </a>{" "}
         to list your documents.
@@ -154,6 +170,9 @@ function MyDocuments({
       showListed
       onToggleListed={handleToggleListed}
       pendingListedId={pendingListedId}
+      showShared
+      onTogglePublic={handleTogglePublic}
+      pendingPublicId={pendingPublicId}
       renderActions={(doc) => (
         <button
           onClick={() => void handleDelete(doc.id)}
@@ -173,7 +192,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
   useLoaderRefresh();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const tab = searchParams.get("tab") === "my" ? "my" : "listed";
+  const tab = parseHomeTab(searchParams.get("tab"));
   const { createNew, uploadFile } = useCreateDoc();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -239,7 +258,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           <div className="flex shrink-0 items-stretch border-l border-border">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
+              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
             >
               Upload
             </button>
@@ -247,7 +266,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           <div className="flex shrink-0 items-stretch border-l border-border">
             <button
               onClick={handleDemoDocument}
-              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider text-muted transition-colors hover:bg-border hover:text-ink"
+              className="cursor-pointer whitespace-nowrap px-3 text-sm uppercase tracking-wider transition-colors hover:bg-border"
             >
               Demo
             </button>

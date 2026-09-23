@@ -55,6 +55,9 @@ export interface DocumentContextValue {
   // Visibility — listed documents appear on the homepage
   isListed: boolean;
   toggleListed: () => void;
+  // Public documents' /raw and /render pages need no sign-in
+  isPublic: boolean;
+  togglePublic: () => void;
 
   // Comments
   commentActive: boolean;
@@ -193,6 +196,14 @@ export function DocumentProvider({
       body: JSON.stringify({ listed: !yjs.isListed }),
     }).catch((err) => console.error("listed toggle failed", err));
   }, [docId, yjs.isListed]);
+
+  const togglePublic = useCallback(() => {
+    fetch(`/docs/${docId}/public`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ public: !yjs.isPublic }),
+    }).catch((err) => console.error("public toggle failed", err));
+  }, [docId, yjs.isPublic]);
 
   const handleEditorReady = useCallback((editor: TiptapEditor) => {
     setEditorInstance(editor);
@@ -351,6 +362,8 @@ export function DocumentProvider({
     setDocWidth,
     isListed: yjs.isListed,
     toggleListed,
+    isPublic: yjs.isPublic,
+    togglePublic,
     commentActive,
     commentSelection,
     commentHighlight,
