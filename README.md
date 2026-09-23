@@ -12,6 +12,7 @@ Everything is public by URL. Documents persist live with no save button. Multipl
 - **Threaded comments** with highlight anchoring
 - **Preview mode** — rendered markdown with click, hover, or keypress toggle
 - **CLI upload** — `curl https://your-domain/new -T file.md`
+- **MCP server** at `/mcp` — agents read, publish and update documents, upload assets, and answer and resolve comments
 - **Drag and drop** `.md` files to create new documents
 - **Dark/light/auto themes**
 
@@ -63,6 +64,21 @@ To enable [Fathom](https://usefathom.com/) analytics, set these environment vari
 VITE_FATHOM_SITE_ID=your-site-id
 VITE_FATHOM_DOMAINS=your-domain.com
 ```
+
+### MCP
+
+Point an MCP client at `https://your-domain/mcp`. Clients that support
+OAuth (Claude, Claude Code, Cursor, ...) sign in through the instance's
+OIDC login and ask for approval; the resulting access shows up on
+`/tokens` as `MCP: <client>` and is revoked there. Other clients can pass
+an API token from `/tokens`:
+
+```sh
+claude mcp add --transport http mist https://your-domain/mcp \
+  --header "Authorization: Bearer mist_..."
+```
+
+Tools: `read`, `publish`, `update`, `post_asset`, `threads`, `reply`, `resolve`.
 
 ### Commands
 

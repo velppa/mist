@@ -14,6 +14,11 @@ Publish markdown, txt, jsx, ipynb or html to the mist instance using
 MIST_HOST=https://mist.example.instance
 ```
 
+If the `mist` MCP server is connected, prefer its tools (`read`,
+`publish`, `update`, `post_asset`, `threads`, `reply`, `resolve`); the rules
+below — read before update, resolving comments, the 409 guard — apply
+to them unchanged.
+
 ## 1. Authorization
 
 In Claude's remote environments auth token is injected

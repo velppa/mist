@@ -3,6 +3,8 @@ import { routeAgentRequest } from "agents";
 import { cloudflareContext } from "../app/lib/cloudflare.server";
 import { handleDocUpdate, handleListedUpdate, handlePublicUpdate } from "../app/lib/update.server";
 import { isPublicDocumentPage } from "../app/lib/public-access.server";
+import { handleMcpRequest } from "../app/lib/mcp.server";
+import { handleMcpOAuthRequest, isMcpOAuthPath, MCP_PATH } from "../app/lib/mcp-oauth.server";
 import { handleThreadsRequest } from "../app/lib/threads.server";
 import { handleAssetUpload, handleAssetGet } from "../app/lib/assets.server";
 import {
@@ -39,6 +41,15 @@ export default {
       url.pathname.startsWith("/agents/asset-store")
     ) {
       return new Response("Not found", { status: 404 });
+    }
+
+    // MCP for AI agents, and the OAuth flow its clients sign in through.
+    // Both authenticate on their own terms, so they bypass the page gate.
+    if (url.pathname === MCP_PATH) {
+      return handleMcpRequest(request, env, ctx);
+    }
+    if (isMcpOAuthPath(url.pathname)) {
+      return handleMcpOAuthRequest(request, authEnv);
     }
 
     // Image uploads and serving. GET is deliberately ungated — see
