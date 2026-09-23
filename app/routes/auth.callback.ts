@@ -2,11 +2,13 @@ import { redirect } from "react-router";
 import type { Route } from "./+types/auth.callback";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import {
+  configuredIssuer,
+  externalUrl,
   createSessionCookie,
   exchangeCode,
   getCookie,
   isSsoConfigured,
-  oidcIssuer,
+  oidcClient,
   verifyIdToken,
   verifyPayload,
   OIDC_COOKIE,
@@ -97,7 +99,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     return redirect("/");
   }
 
-  const url = new URL(request.url);
+  const url = externalUrl(request);
 
   const oidcError = url.searchParams.get("error");
   if (oidcError) {
@@ -128,18 +130,20 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   let email: string;
   try {
+    const issuer = configuredIssuer(authEnv);
+    const { clientId, clientSecret } = oidcClient(authEnv);
     const { id_token } = await exchangeCode({
-      subdomain: authEnv.ONELOGIN_SUBDOMAIN!,
-      clientId: authEnv.ONELOGIN_CLIENT_ID!,
-      clientSecret: authEnv.ONELOGIN_CLIENT_SECRET!,
+      issuer,
+      clientId,
+      clientSecret,
       code,
       redirectUri: `${url.origin}/auth/callback`,
       codeVerifier: payload.verifier,
     });
     email = await verifyIdToken({
       idToken: id_token,
-      issuer: oidcIssuer(authEnv.ONELOGIN_SUBDOMAIN!),
-      clientId: authEnv.ONELOGIN_CLIENT_ID!,
+      issuer,
+      clientId,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";

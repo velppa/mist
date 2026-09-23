@@ -3,9 +3,12 @@ import type { Route } from "./+types/auth.login";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import {
   buildAuthorizeUrl,
+  configuredIssuer,
+  externalUrl,
   generatePkce,
   generateState,
   isSsoConfigured,
+  oidcClient,
   signPayload,
   OIDC_COOKIE,
   OIDC_STATE_MAX_AGE_SECONDS,
@@ -26,7 +29,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     return redirect("/");
   }
 
-  const url = new URL(request.url);
+  const url = externalUrl(request);
   const redirectTo = url.searchParams.get("redirect") ?? "/";
   // Only allow same-origin relative paths to prevent open redirects.
   const safeRedirect = redirectTo.startsWith("/") && !redirectTo.startsWith("//")
@@ -45,8 +48,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const cookieValue = await signPayload(payload, authEnv.SESSION_SECRET!);
 
   const authorizeUrl = buildAuthorizeUrl({
-    subdomain: authEnv.ONELOGIN_SUBDOMAIN!,
-    clientId: authEnv.ONELOGIN_CLIENT_ID!,
+    issuer: configuredIssuer(authEnv),
+    clientId: oidcClient(authEnv).clientId,
     redirectUri: `${url.origin}/auth/callback`,
     state,
     codeChallenge: challenge,

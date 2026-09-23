@@ -4,6 +4,7 @@ import {
   base64UrlDecode,
   base64UrlEncode,
   buildAuthorizeUrl,
+  configuredIssuer,
   createSessionCookie,
   exchangeCode,
   generatePkce,
@@ -13,6 +14,7 @@ import {
   getSessionEmail,
   isAuthConfigured,
   isSsoConfigured,
+  oidcClient,
   oidcIssuer,
   parseApiTokens,
   requiresLogin,
@@ -175,6 +177,35 @@ describe("configuration checks", () => {
     expect(isSsoConfigured({})).toBe(false);
   });
 
+  it("isSsoConfigured accepts the generic OIDC_* variables", () => {
+    expect(
+      isSsoConfigured({
+        OIDC_ISSUER: "https://auth.example/oidc",
+        OIDC_CLIENT_ID: "cid",
+        OIDC_CLIENT_SECRET: "cs",
+        SESSION_SECRET: "s",
+      }),
+    ).toBe(true);
+    expect(
+      isSsoConfigured({ OIDC_ISSUER: "https://auth.example/oidc", SESSION_SECRET: "s" }),
+    ).toBe(false);
+  });
+
+  it("oidcClient prefers OIDC_* over ONELOGIN_* and falls back per field", () => {
+    expect(oidcClient(fullSso)).toEqual({ clientId: "cid", clientSecret: "cs" });
+    expect(
+      oidcClient({ ...fullSso, OIDC_CLIENT_ID: "oid", OIDC_CLIENT_SECRET: "osec" }),
+    ).toEqual({ clientId: "oid", clientSecret: "osec" });
+    expect(oidcClient({})).toEqual({ clientId: "", clientSecret: "" });
+  });
+
+  it("configuredIssuer prefers OIDC_ISSUER and strips a trailing slash", () => {
+    expect(configuredIssuer(fullSso)).toBe("https://vio.onelogin.com/oidc/2");
+    expect(
+      configuredIssuer({ ...fullSso, OIDC_ISSUER: "https://auth.example/oidc/" }),
+    ).toBe("https://auth.example/oidc");
+  });
+
   it("isAuthConfigured is true with tokens or SSO", () => {
     expect(isAuthConfigured({})).toBe(false);
     expect(isAuthConfigured({ MIST_API_TOKENS: "t:a@vio.com" })).toBe(true);
@@ -270,7 +301,7 @@ describe("PKCE and authorize URL", () => {
   it("buildAuthorizeUrl points at the OneLogin OIDC2 endpoint", () => {
     const url = new URL(
       buildAuthorizeUrl({
-        subdomain: "vio",
+        issuer: "https://vio.onelogin.com/oidc/2",
         clientId: "cid",
         redirectUri: "https://mist.example.com/auth/callback",
         state: "st4te",
@@ -297,7 +328,7 @@ describe("exchangeCode", () => {
     );
 
     const result = await exchangeCode({
-      subdomain: "vio",
+      issuer: "https://vio.onelogin.com/oidc/2",
       clientId: "cid",
       clientSecret: "cs",
       code: "authcode",
@@ -327,7 +358,7 @@ describe("exchangeCode", () => {
       .mockResolvedValue(new Response("nope", { status: 401 }));
     await expect(
       exchangeCode({
-        subdomain: "vio",
+        issuer: "https://vio.onelogin.com/oidc/2",
         clientId: "cid",
         clientSecret: "cs",
         code: "authcode",
@@ -381,7 +412,11 @@ async function makeIdToken(
 }
 
 function jwksFetch(jwk: JsonWebKey) {
-  return vi.fn().mockResolvedValue(new Response(JSON.stringify({ keys: [jwk] })));
+  // Fresh Response per call: verifyIdToken may fetch the discovery
+  // document before the JWKS, and a Response body reads only once.
+  return vi.fn().mockImplementation(() =>
+    Promise.resolve(new Response(JSON.stringify({ keys: [jwk] }))),
+  );
 }
 
 describe("verifyIdToken", () => {

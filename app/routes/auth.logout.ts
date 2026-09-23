@@ -2,15 +2,17 @@ import { redirect } from "react-router";
 import type { Route } from "./+types/auth.logout";
 import { getCloudflare } from "~/lib/cloudflare.server";
 import {
+  configuredIssuer,
+  externalUrl,
   isSsoConfigured,
-  oidcIssuer,
+  oidcClient,
   SESSION_COOKIE,
   type AuthEnv,
 } from "~/lib/auth.server";
 
 /**
  * End the session: clear the session cookie and, when SSO is configured,
- * also end the OneLogin session so the next visit prompts for credentials
+ * also end the provider session so the next visit prompts for credentials
  * instead of silently re-authenticating.
  */
 export function loader({ request, context }: Route.LoaderArgs) {
@@ -19,11 +21,11 @@ export function loader({ request, context }: Route.LoaderArgs) {
 
   let target = "/";
   if (isSsoConfigured(authEnv)) {
-    const logoutUrl = new URL(`${oidcIssuer(authEnv.ONELOGIN_SUBDOMAIN!)}/logout`);
-    logoutUrl.searchParams.set("client_id", authEnv.ONELOGIN_CLIENT_ID!);
+    const logoutUrl = new URL(`${configuredIssuer(authEnv)}/logout`);
+    logoutUrl.searchParams.set("client_id", oidcClient(authEnv).clientId);
     logoutUrl.searchParams.set(
       "post_logout_redirect_uri",
-      `${new URL(request.url).origin}/`,
+      `${externalUrl(request).origin}/`,
     );
     target = logoutUrl.toString();
   }

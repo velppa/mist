@@ -20,6 +20,11 @@
 import { TOKEN_STORE_AGENT_NAME } from "~/shared/constants";
 
 export interface AuthEnv {
+  /** Full OIDC issuer URL; takes precedence over ONELOGIN_SUBDOMAIN. */
+  OIDC_ISSUER?: string;
+  /** OIDC client credentials; take precedence over the ONELOGIN_* pair. */
+  OIDC_CLIENT_ID?: string;
+  OIDC_CLIENT_SECRET?: string;
   ONELOGIN_SUBDOMAIN?: string;
   ONELOGIN_CLIENT_ID?: string;
   ONELOGIN_CLIENT_SECRET?: string;
@@ -38,14 +43,42 @@ export const OIDC_STATE_MAX_AGE_SECONDS = 10 * 60; // login round-trip window
 /*  Configuration checks                                               */
 /* ------------------------------------------------------------------ */
 
-/** SSO needs all OneLogin credentials plus a secret to sign sessions with. */
+/** SSO needs an issuer, client credentials, and a session-signing secret. */
 export function isSsoConfigured(env: AuthEnv): boolean {
+  const { clientId, clientSecret } = oidcClient(env);
   return Boolean(
-    env.ONELOGIN_SUBDOMAIN &&
-      env.ONELOGIN_CLIENT_ID &&
-      env.ONELOGIN_CLIENT_SECRET &&
+    (env.OIDC_ISSUER || env.ONELOGIN_SUBDOMAIN) &&
+      clientId &&
+      clientSecret &&
       env.SESSION_SECRET,
   );
+}
+
+/** The OIDC client credentials in effect: OIDC_* first, else ONELOGIN_*. */
+export function oidcClient(env: AuthEnv): { clientId: string; clientSecret: string } {
+  return {
+    clientId: env.OIDC_CLIENT_ID || env.ONELOGIN_CLIENT_ID || "",
+    clientSecret: env.OIDC_CLIENT_SECRET || env.ONELOGIN_CLIENT_SECRET || "",
+  };
+}
+
+/** The OIDC issuer in effect: explicit OIDC_ISSUER, else OneLogin. */
+export function configuredIssuer(env: AuthEnv): string {
+  if (env.OIDC_ISSUER) return env.OIDC_ISSUER.replace(/\/$/, "");
+  return oidcIssuer(env.ONELOGIN_SUBDOMAIN!);
+}
+
+/**
+ * The request URL as the outside world sees it.  Behind a
+ * TLS-terminating proxy the worker itself is spoken to over http;
+ * X-Forwarded-Proto carries the real scheme.
+ */
+export function externalUrl(request: Request): URL {
+  const url = new URL(request.url);
+  if (request.headers.get("x-forwarded-proto") === "https") {
+    url.protocol = "https:";
+  }
+  return url;
 }
 
 export function isAuthConfigured(env: AuthEnv): boolean {
@@ -360,13 +393,13 @@ export function generateState(): string {
 }
 
 export function buildAuthorizeUrl(options: {
-  subdomain: string;
+  issuer: string;
   clientId: string;
   redirectUri: string;
   state: string;
   codeChallenge: string;
 }): string {
-  const url = new URL(`${oidcIssuer(options.subdomain)}/auth`);
+  const url = new URL(`${options.issuer}/auth`);
   url.searchParams.set("client_id", options.clientId);
   url.searchParams.set("redirect_uri", options.redirectUri);
   url.searchParams.set("response_type", "code");
@@ -377,9 +410,9 @@ export function buildAuthorizeUrl(options: {
   return url.toString();
 }
 
-/** Exchange the authorization code for tokens at OneLogin's token endpoint. */
+/** Exchange the authorization code for tokens at the issuer's token endpoint. */
 export async function exchangeCode(options: {
-  subdomain: string;
+  issuer: string;
   clientId: string;
   clientSecret: string;
   code: string;
@@ -395,9 +428,9 @@ export async function exchangeCode(options: {
     code_verifier: options.codeVerifier,
   });
 
-  // OneLogin's default token-endpoint auth method is client_secret_basic
+  // client_secret_basic works for OneLogin and home-auth alike
   const basic = btoa(`${options.clientId}:${options.clientSecret}`);
-  const res = await doFetch(`${oidcIssuer(options.subdomain)}/token`, {
+  const res = await doFetch(`${options.issuer}/token`, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -445,7 +478,17 @@ export async function verifyIdToken(options: {
   ) as { alg?: string; kid?: string };
   if (header.alg !== "RS256") throw new Error(`unsupported ID token alg: ${header.alg}`);
 
-  const jwksRes = await doFetch(`${options.issuer}/certs`);
+  // The JWKS path differs per provider (OneLogin /certs, home-auth
+  // /jwks); the discovery document names it authoritatively.
+  let jwksUri = `${options.issuer}/certs`;
+  const discoveryRes = await doFetch(
+    `${options.issuer}/.well-known/openid-configuration`,
+  ).catch(() => null);
+  if (discoveryRes?.ok) {
+    const discovery = (await discoveryRes.json()) as { jwks_uri?: string };
+    if (discovery.jwks_uri) jwksUri = discovery.jwks_uri;
+  }
+  const jwksRes = await doFetch(jwksUri);
   if (!jwksRes.ok) throw new Error(`failed to fetch JWKS (status ${jwksRes.status})`);
   const jwks = (await jwksRes.json()) as { keys: (JsonWebKey & { kid?: string })[] };
 
